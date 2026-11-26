@@ -75,7 +75,9 @@ One entry per portal on this server. The key is the **target server**.
 |---|---|---|
 | `name` | target, capitalised | Name used in messages and, with `label: true`, floating above the portal. |
 | `label` | `false` | `true` shows the name (and an "offline" note while the target is down) floating above the portal. |
-| `style` | `gate` | `gate` – opening in a thick stone wall. `rift` – floating dimensional crack. |
+| `sound` | `false` | `true` plays the style's ambient sounds (crackling fire, thunder, humming …) to players nearby. Sound category *Ambient/Environment*, so players can turn it down in their settings. |
+| `volume` | `1.0` | Volume of those sounds, `0` – `4` (above 1 they also carry further). |
+| `style` | `gate` | The look, see [Styles](#styles): `gate`, `rift`, `inferno`, `storm`, `void`, `frost`. |
 | `x`, `y`, `z` | auto | Position of the portal (see below). If missing, MagicPortals places the portal on flat ground near the world spawn and writes the coordinates back. |
 | `facing` | `south` | Direction the opening faces, i.e. the side players walk in from: `south`, `north`, `east` or `west`. `/mp set` fills this in for you. |
 | `frame.outer` | `STONE_BRICKS` | Outer wall blocks (style `gate`). Any block material. |
@@ -91,10 +93,25 @@ One entry per portal on this server. The key is the **target server**.
 What gets built:
 
 - **gate:** a wall of block displays reaching 2 blocks around the opening (amethyst rim, glowing glass edge). Invisible barriers in the wall stop players from walking through it. With `frame: none` nothing is built.
-- **rift:** no wall. A few invisible light blocks make the surroundings glow.
+- **rift, inferno, storm, void, frost:** no wall. A few invisible light blocks make the surroundings glow.
 - **both:** a hidden marker entity for the shader and, with `label: true`, a floating name; with `inside-view: true` (and `barriers: true`) also invisible barriers in the 3 blocks right behind the opening. Everything is removed again when the plugin stops; the world itself is not changed otherwise.
 
 **Counterparts.** A portal from A to B shows what is in front of the portal from B to A, and players arriving from A spawn in front of that portal. So every portal needs a counterpart on its target server.
+
+## Styles
+
+Change a portal's look at any time with `/mp edit <server> style <name>` (or `/mp style`). The shapes and edge effects are drawn by the shader; particles and sounds come from the server. All styles scale with `width`/`height`.
+
+| Style | Shape | Effects | Seen from behind | Good for |
+|---|---|---|---|---|
+| `gate` | Rectangle in a stone wall (or your own frame) | Glowing cyan inner edge, sparks | Flat | Spawn, hubs |
+| `rift` | Tall jagged crack | Cyan / magenta / gold edge, lightning arcs, sparkles, particles pulled in | Starry nebula | Anything magical |
+| `inferno` | Pointed arch | Flames licking up from the edge, embers, heat shimmer in the opening, smoke and lava drips | Glowing lava crust | Nether, fire dungeons |
+| `storm` | Crackling oval | Violet-white electric rim, long lightning arcs, a bolt striking through the portal with a flash; every few seconds a (harmless) lightning strike hits the ground in front of it | Dark thunderclouds lighting up | Boss chambers, arenas |
+| `void` | Round vortex | Swirling purple rim and dark halo, the view twisted towards the edge, specks spiralling in | Black spiral | The End, void worlds |
+| `frost` | Oval overgrown with ice crystals | Pale rim, cold mist, glitter, snowflakes falling | Ice with cracks | Winter areas, ice dungeons |
+
+Sounds are off by default (`sound: false`). The lightning strikes of `storm` are only particles, a short flash of light (client-side) and – with sound on – thunder for nearby players; they do no damage, start no fires and are not heard across the whole world like real lightning.
 
 ## `resource-pack`
 

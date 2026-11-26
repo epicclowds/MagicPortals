@@ -10,6 +10,7 @@ import magicportals.exchange.MySqlExchange;
 import magicportals.pack.ResourcePack;
 import magicportals.portal.Facing;
 import magicportals.portal.Portal;
+import magicportals.portal.Style;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.*;
@@ -193,19 +194,21 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                 getLogger().info("Portal to " + target + " placed automatically at " + pos[0] + " " + pos[1] + " " + pos[2]);
             }
             String name = p.getString("name", target.substring(0, 1).toUpperCase(Locale.ROOT) + target.substring(1));
-            String style = p.getString("style", "gate").toLowerCase(Locale.ROOT);
+            Style style = Style.parse(p.getString("style", "gate"));
+            if (style == null) { getLogger().warning("Unknown style for portal " + target + ": " + p.getString("style") + " – using gate"); style = Style.GATE; }
             boolean noFrame = "none".equalsIgnoreCase(p.getString("frame"));
             portals.add(new Portal(this, world, target, name, pos[0], pos[1], pos[2],
                     Facing.parse(p.getString("facing", "south")), p.getInt("width", 3), p.getInt("height", 3),
                     noFrame ? null : material(p.getString("frame.outer"), Material.STONE_BRICKS),
                     noFrame ? null : material(p.getString("frame.inner"), Material.POLISHED_BLACKSTONE_BRICKS),
-                    style.equals("rift"), p.getBoolean("inside-view", false), p.getBoolean("barriers", false), p.getBoolean("label", false), messages.get("offline.sign")));
+                    style, p.getBoolean("inside-view", false), p.getBoolean("barriers", false), p.getBoolean("label", false),
+                    p.getBoolean("sound", false), (float) p.getDouble("volume", 1.0), messages.get("offline.sign")));
         }
         scenesVersion = -1;
         for (Portal p : portals) {
             p.build();
             save(p.captureAll(server));
-            getLogger().info("Portal " + server + " -> " + p.target + " at " + p.x + " " + p.y + " " + p.z + (p.rift ? " (rift)" : " (gate)"));
+            getLogger().info("Portal " + server + " -> " + p.target + " at " + p.x + " " + p.y + " " + p.z + " (" + p.style.id + ")");
         }
         sync();
     }
@@ -471,7 +474,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             case "list" -> {
                 sender.sendMessage(text("list.header", server, exchangeName()));
                 if (portals.isEmpty()) sender.sendMessage(text("list.none"));
-                for (Portal p : portals) sender.sendMessage(Component.text("  → " + p.target + "  " + p.x + " " + p.y + " " + p.z + " " + facingName(p.facing) + "  " + messages.get(p.rift ? "style.rift" : "style.gate") + "  ")
+                for (Portal p : portals) sender.sendMessage(Component.text("  → " + p.target + "  " + p.x + " " + p.y + " " + p.z + " " + facingName(p.facing) + "  " + messages.get("style." + p.style.id) + "  ")
                         .append(p.reachable() ? Component.text(messages.get("list.online"), NamedTextColor.GREEN) : Component.text(messages.get("list.offline"), NamedTextColor.RED))
                         .append(Component.text(p.scene() == null ? messages.get("list.noscene") : messages.get("list.scene", p.scene()), NamedTextColor.GRAY)));
             }
@@ -530,7 +533,8 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                 sender.sendMessage(text("remove.done", args[1]));
             }
             case "style" -> {
-                String style = args.length >= 3 ? switch (args[2].toLowerCase(Locale.ROOT)) { case "riss", "rift" -> "rift"; case "tor", "gate" -> "gate"; default -> ""; } : "";
+                Style parsed = args.length >= 3 ? Style.parse(args[2]) : null;
+                String style = parsed == null ? "" : parsed.id;
                 if (args.length < 3 || !getConfig().contains("portals." + args[1]) || style.isEmpty()) { sender.sendMessage(error("style.usage")); return true; }
                 getConfig().set("portals." + args[1] + ".style", style);
                 saveConfig();
@@ -551,13 +555,15 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
     private static final Map<String, List<String>> EDITABLE = new LinkedHashMap<>();
     static {
         EDITABLE.put("name", List.of());
-        EDITABLE.put("style", List.of("gate", "rift"));
+        EDITABLE.put("style", Style.ids());
         EDITABLE.put("facing", List.of("south", "north", "east", "west"));
         EDITABLE.put("width", List.of("1", "2", "3", "4", "5", "6", "7"));
         EDITABLE.put("height", List.of("1", "2", "3", "4", "5", "6", "7"));
         EDITABLE.put("inside-view", List.of("true", "false"));
         EDITABLE.put("barriers", List.of("true", "false"));
         EDITABLE.put("label", List.of("true", "false"));
+        EDITABLE.put("sound", List.of("true", "false"));
+        EDITABLE.put("volume", List.of("0.25", "0.5", "1", "1.5", "2"));
         EDITABLE.put("frame", List.of("none", "wall"));
     }
 
@@ -581,6 +587,8 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                     case "inside-view" -> c.getBoolean(path + ".inside-view", false);
                     case "barriers" -> c.getBoolean(path + ".barriers", false);
                     case "label" -> c.getBoolean(path + ".label", false);
+                    case "sound" -> c.getBoolean(path + ".sound", false);
+                    case "volume" -> c.getDouble(path + ".volume", 1.0);
                     default -> "none".equalsIgnoreCase(c.getString(path + ".frame")) ? "none" : "wall";
                 };
                 sender.sendMessage(Component.text("  " + key + ": ", NamedTextColor.GRAY).append(Component.text(String.valueOf(value))));
@@ -594,14 +602,19 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         Object stored;
         switch (key) {
             case "name" -> stored = raw;
-            case "style" -> stored = switch (value) { case "riss", "rift" -> "rift"; case "tor", "gate" -> "gate"; default -> null; };
+            case "style" -> { Style s = Style.parse(value); stored = s == null ? null : s.id; }
+            case "volume" -> {
+                double v;
+                try { v = Double.parseDouble(value.replace(',', '.')); } catch (NumberFormatException e) { v = -1; }
+                stored = v >= 0 && v <= 4 ? v : null;
+            }
             case "facing" -> stored = EDITABLE.get("facing").contains(value) ? value : null;
             case "width", "height" -> {
                 int n;
                 try { n = Integer.parseInt(value); } catch (NumberFormatException e) { n = 0; }
                 stored = n >= 1 && n <= Portal.MAX_SIZE ? n : null;
             }
-            case "inside-view", "barriers", "label" -> stored = switch (value) { case "true", "on", "yes", "an", "ja" -> true; case "false", "off", "no", "aus", "nein" -> false; default -> null; };
+            case "inside-view", "barriers", "label", "sound" -> stored = switch (value) { case "true", "on", "yes", "an", "ja" -> true; case "false", "off", "no", "aus", "nein" -> false; default -> null; };
             default -> stored = value.equals("none") ? "none" : value.equals("wall") ? "wall" : null;
         }
         if (stored == null) { sender.sendMessage(error("edit.invalid", raw, key, String.join(", ", EDITABLE.get(key)))); return; }
@@ -622,7 +635,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             String sub = subCommand(args[0]);
             if (args.length == 2 && (sub.equals("remove") || sub.equals("style") || sub.equals("edit") || sub.equals("set")))
                 options = portals.stream().map(p -> p.target).toList();
-            else if (args.length == 3 && sub.equals("style")) options = List.of("gate", "rift");
+            else if (args.length == 3 && sub.equals("style")) options = Style.ids();
             else if (args.length == 3 && sub.equals("edit")) options = List.copyOf(EDITABLE.keySet());
             else if (args.length == 4 && sub.equals("edit")) options = EDITABLE.getOrDefault(args[2].toLowerCase(Locale.ROOT), List.of());
         }

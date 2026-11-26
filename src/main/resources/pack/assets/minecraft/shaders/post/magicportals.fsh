@@ -303,6 +303,204 @@ vec3 riftNebula(vec2 p, float time) {
     return c;
 }
 
+// ---------- further styles: 2 inferno, 3 storm, 4 void, 5 frost ----------
+
+float ellipseDistance(vec2 p, vec2 c, vec2 r) { return (length((p - c) / r) - 1.0) * min(r.x, r.y); }
+float boxDistance(vec2 p, vec2 lo, vec2 hi) {
+    vec2 c = (lo + hi) * 0.5, d = abs(p - c) - (hi - lo) * 0.5;
+    return length(max(d, 0.0)) + min(max(d.x, d.y), 0.0);
+}
+vec2 openingCenter() { return vec2(OPENING_W, OPENING_H) * 0.5; }
+
+vec3 fireRamp(float t) {
+    t = clamp(t, 0.0, 1.0);
+    vec3 c = mix(vec3(0.0), vec3(0.6, 0.05, 0.0), smoothstep(0.0, 0.3, t));
+    c = mix(c, vec3(1.0, 0.35, 0.02), smoothstep(0.25, 0.6, t));
+    c = mix(c, vec3(1.0, 0.8, 0.25), smoothstep(0.55, 0.85, t));
+    return mix(c, vec3(1.0, 0.97, 0.8), smoothstep(0.85, 1.0, t));
+}
+
+// Frost: an oval whose rim is overgrown with ice crystals reaching into the opening.
+float frostSpikes(float angle) {
+    float s = max(0.0, kinkNoise(angle * 9.0 + 3.0) - 0.35) * 1.6;
+    return (0.05 + 0.3 * s * s) * min(OPENING_W, OPENING_H) / 3.0;
+}
+
+// Storm: one big lightning strike every ~0.8 s (not every beat); returns the flash strength.
+float STORM_FLASH = 0.0;
+float stormBeat(float time) { return floor(time * 1.25); }
+float stormFlash(float time) {
+    float beat = stormBeat(time), phase = fract(time * 1.25);
+    if (hash1(beat * 3.7) < 0.35) return 0.0;
+    return exp(-phase * 9.0) * (0.6 + 0.4 * step(0.5, fract(phase * 14.0)));
+}
+
+// Signed distance to the opening edge in blocks (negative = inside) for styles 2..5.
+float styleDistance(int style, vec2 p, float time, out float angle) {
+    vec2 c = openingCenter(), q = p - c;
+    angle = atan(q.y, q.x);
+    if (style == 2) {
+        // pointed arch, the edge licking like a flame
+        float r = min(OPENING_W * 0.5, OPENING_H * 0.45);
+        float d = min(boxDistance(p, vec2(0.0), vec2(OPENING_W, OPENING_H - r)),
+                      ellipseDistance(p, vec2(c.x, OPENING_H - r), vec2(OPENING_W * 0.5, r)));
+        return d + 0.07 * (noise2(vec2(angle * 4.0, time * 3.0)) - 0.5);
+    }
+    if (style == 3) {
+        // oval, its edge crackling with electricity
+        float d = ellipseDistance(p, c, vec2(OPENING_W * 0.5, OPENING_H * 0.5 + 0.1));
+        return d + 0.05 * (kinkNoise(angle * 12.0 + floor(time * 12.0) * 3.1) - 0.5);
+    }
+    if (style == 4) {
+        // round vortex, slowly wobbling
+        return ellipseDistance(p, c, vec2(OPENING_W * 0.5, OPENING_H * 0.5)) + 0.035 * sin(angle * 5.0 + time * 2.0);
+    }
+    // frost
+    return ellipseDistance(p, c, vec2(OPENING_W * 0.5, OPENING_H * 0.5 + 0.05)) + frostSpikes(angle);
+}
+
+// How far outside the edge a style still draws something.
+float styleReach(int style) { return style == 3 ? 6.0 : style == 2 ? 2.2 : 1.3; }
+
+// Lightning arcs leaving the edge (like the rift's, with parameters).
+vec3 edgeArcs(vec2 p, float e, float angle, float time, int count, float rate, float minLength, float maxLength, vec3 tint, float seed) {
+    vec3 glow = vec3(0.0);
+    float radius = length(p - openingCenter());
+    for (int k = 0; k < 12; k++) {
+        if (k >= count) break;
+        float fk = float(k) + seed;
+        float beat = floor(time * (rate + hash1(fk) * rate) + fk * 0.37);
+        if (hash1(fk * 7.1 + beat * 1.3) < 0.4) continue;
+        float arcLength = minLength + (maxLength - minLength) * hash1(fk * 3.7 + beat);
+        if (e <= 0.0 || e > arcLength) continue;
+        float start = fk * 6.28318 / float(count) + (hash1(fk * 5.3 + beat * 2.1) - 0.5) * 0.7 - 3.14159;
+        float jag = (noise1(e * 7.0 + fk * 13.0 + beat * 4.0) - 0.5) * 1.1 + (noise1(e * 29.0 + fk * 5.0 + beat) - 0.5) * 0.3;
+        float arcAngle = start + jag * (0.2 + e / arcLength) / max(radius, 0.5);
+        float deviation = abs(mod(angle - arcAngle + 3.14159, 6.28318) - 3.14159) * radius;
+        float thickness = 0.035 * (1.0 - e / arcLength) + 0.005;
+        glow += mix(vec3(1.0), tint, 0.3) * smoothstep(thickness, 0.0, deviation) * 1.7 + tint * smoothstep(thickness * 7.0, 0.0, deviation) * 0.3;
+    }
+    return glow;
+}
+
+// The big strike of the storm style: a jagged bolt from the sky through the portal to the ground.
+vec3 stormBolt(vec2 p, float time) {
+    float beat = stormBeat(time), phase = fract(time * 1.25);
+    if (hash1(beat * 3.7) < 0.35 || phase > 0.3 || p.y < -0.3 || p.y > OPENING_H + 6.0) return vec3(0.0);
+    float x = OPENING_W * (0.2 + 0.6 * hash1(beat * 1.9)) + 0.7 * (kinkNoise(p.y * 2.2 + beat * 7.0) - 0.5) + 0.15 * (kinkNoise(p.y * 9.0 + beat) - 0.5);
+    float dist = abs(p.x - x);
+    float fade = 1.0 - phase / 0.3;
+    vec3 c = vec3(1.0) * smoothstep(0.06, 0.0, dist) * 2.0 + vec3(0.55, 0.5, 1.0) * exp(-dist * 7.0) * 0.6;
+    // a side branch
+    float by = OPENING_H * (0.6 + 0.5 * hash1(beat * 4.3));
+    if (p.y < by && p.y > by - 1.6) {
+        float bx = x + (by - p.y) * (hash1(beat * 2.2) < 0.5 ? -0.6 : 0.6) + 0.2 * (kinkNoise(p.y * 7.0 + beat * 3.0) - 0.5);
+        float bd = abs(p.x - bx);
+        c += vec3(1.0) * smoothstep(0.035, 0.0, bd) * 1.4 + vec3(0.55, 0.5, 1.0) * exp(-bd * 9.0) * 0.35;
+    }
+    return c * fade;
+}
+
+// Glow, flames, arcs and sparkles around the edge.
+vec3 styleGlow(int style, vec2 p, float e, float angle, float time) {
+    if (style == 2) {
+        // flames rising from the edge, taller towards the top, with embers
+        float up = clamp((p.y - OPENING_H * 0.5) / OPENING_H + 0.6, 0.15, 1.3);
+        float n = noise2(vec2(p.x * 2.2, p.y * 1.6 - time * 2.6)) * 0.6 + noise2(vec2(p.x * 5.0, p.y * 3.5 - time * 4.5)) * 0.4;
+        float reach = (0.2 + 0.95 * up) * (0.45 + n);
+        float heat = e > 0.0 ? clamp(1.0 - e / reach, 0.0, 1.0) : exp(e * 9.0);
+        heat = pow(heat, 1.4);
+        vec3 c = fireRamp(heat * (0.7 + 0.4 * n)) * heat * 1.7;
+        c += vec3(1.0, 0.6, 0.15) * exp(-abs(e) * 30.0) * 1.1;
+        vec2 q = p * vec2(9.0, 6.0) + vec2(0.0, -time * 3.0);
+        float ember = step(0.94, hash2(floor(q))) * smoothstep(0.3, 0.0, length(fract(q) - 0.5));
+        c += vec3(1.0, 0.5, 0.1) * ember * exp(-max(e, 0.0) * 1.2) * step(-0.15, e);
+        return c;
+    }
+    if (style == 3) {
+        vec3 violet = vec3(0.6, 0.45, 1.0);
+        float flicker = 0.6 + 0.4 * noise1(time * 25.0 + angle * 6.0);
+        vec3 c = mix(violet, vec3(1.0), 0.5) * exp(-abs(e) * 30.0) * 2.0 * flicker;
+        c += violet * (exp(-max(e, 0.0) * 4.0) * 0.25 + exp(-max(-e, 0.0) * 10.0) * 0.2) * flicker;
+        c += edgeArcs(p, e, angle, time, 10, 5.0, 0.4, 1.9, violet, 0.0);
+        c += stormBolt(p, time);
+        c += vec3(0.75, 0.75, 1.0) * STORM_FLASH * 0.35 * exp(-max(e, 0.0) * 0.5);
+        return c;
+    }
+    if (style == 4) {
+        vec2 q = (p - openingCenter()) / vec2(OPENING_W * 0.5, OPENING_H * 0.5);
+        float r = length(q), a = atan(q.y, q.x);
+        float swirl = 0.5 + 0.5 * sin(a * 3.0 + r * 9.0 - time * 2.5);
+        float swirl2 = noise2(vec2(a * 2.0 + time * 0.7 - r * 3.0, r * 4.0));
+        vec3 c = mix(vec3(0.55, 0.15, 0.95), vec3(0.95, 0.35, 0.85), swirl2) * exp(-max(e, 0.0) * 3.0) * step(0.0, e) * (0.3 + 0.7 * swirl) * 1.2;
+        c += vec3(0.85, 0.6, 1.0) * exp(-abs(e) * 28.0) * 1.4;
+        // specks spiralling inwards
+        vec2 polar = vec2(a * 4.0 / 3.14159 + time * 0.4, log(max(r, 0.05)) * 5.0 + time * 1.6);
+        float speck = step(0.93, hash2(floor(polar))) * smoothstep(0.35, 0.0, length(fract(polar) - 0.5));
+        c += vec3(0.9, 0.7, 1.0) * speck * step(0.0, e) * exp(-e * 1.8);
+        return c;
+    }
+    // frost: pale rim, cold haze and twinkling ice glitter
+    vec3 c = vec3(0.6, 0.9, 1.0) * exp(-abs(e) * 22.0) * 1.1 + vec3(0.5, 0.8, 1.0) * exp(-max(e, 0.0) * 5.0) * 0.22;
+    vec2 cell = floor(p * 14.0);
+    float twinkle = step(0.96, hash2(cell)) * max(0.0, sin(time * 3.0 + hash2(cell + 7.0) * 40.0));
+    c += vec3(1.0) * twinkle * smoothstep(0.3, 0.0, length(fract(p * 14.0) - 0.5)) * exp(-abs(e) * 2.0);
+    return c;
+}
+
+// What the area right outside the edge looks like (base = the normal image there).
+vec3 styleOutside(int style, vec2 p, float e, float angle, float time, vec3 base) {
+    if (style == 4) return base * mix(1.0, 0.12, exp(-e * 2.2));   // dark halo around the vortex
+    if (style == 2) return base * mix(1.0, 0.55, exp(-e * 3.0));   // scorched surroundings
+    if (style == 5) {
+        float plain = ellipseDistance(p, openingCenter(), vec2(OPENING_W * 0.5, OPENING_H * 0.5 + 0.05));
+        if (plain < 0.0) {
+            // ice crystal growing into the opening: faceted, translucent blue-white
+            float facet = step(0.5, fract(angle * 9.0 / 6.28318 * 6.0 + 0.5));
+            float depth = clamp(-plain / max(frostSpikes(angle), 0.01), 0.0, 1.0);
+            vec3 ice = mix(vec3(0.55, 0.8, 0.95), vec3(0.9, 0.97, 1.0), 0.35 + 0.4 * facet + 0.25 * depth);
+            return ice * (0.85 + 0.15 * sin(time * 1.5 + angle * 20.0));
+        }
+        return base * mix(1.0, 1.25, exp(-plain * 4.0));   // frosty brightening
+    }
+    return base;
+}
+
+// Inside, seen from the front: tint over the destination world near the edge.
+vec3 styleInside(int style, vec3 scene, vec2 p, float e, float time) {
+    if (style == 2) return mix(scene, scene * vec3(1.2, 0.7, 0.45), exp(e * 5.0));
+    if (style == 3) return scene * mix(1.0, 0.6, exp(e * 8.0)) + vec3(0.75, 0.75, 1.0) * STORM_FLASH * 0.25;
+    if (style == 4) {
+        vec2 q = (p - openingCenter()) / vec2(OPENING_W * 0.5, OPENING_H * 0.5);
+        float swirl = 0.5 + 0.5 * sin(atan(q.y, q.x) * 3.0 + length(q) * 9.0 - time * 2.5);
+        return scene * mix(1.0, 0.15 + 0.35 * swirl, exp(e * 3.5)) + vec3(0.3, 0.05, 0.45) * exp(e * 4.0) * 0.5;
+    }
+    return mix(scene, vec3(0.85, 0.93, 1.0), exp(e * 6.0) * 0.55);   // frost mist at the rim
+}
+
+// Seen from behind: no destination, but a style-specific surface.
+vec3 styleBack(int style, vec2 p, float time) {
+    if (style == 2) {
+        float n = noise2(p * 1.5 + vec2(0.0, time * 0.2));
+        float crack = 1.0 - smoothstep(0.0, 0.07, abs(noise2(p * 2.5 + time * 0.1) - 0.5));
+        return mix(vec3(0.08, 0.02, 0.01), vec3(0.35, 0.05, 0.0), n) + fireRamp(0.9) * crack * (0.6 + 0.4 * sin(time * 2.0 + n * 6.0));
+    }
+    if (style == 3) {
+        float n = noise2(p * 1.2 + vec2(time * 0.3, 0.0)) * 0.6 + noise2(p * 3.0 - time * 0.4) * 0.4;
+        return mix(vec3(0.04, 0.04, 0.08), vec3(0.3, 0.3, 0.42), n * n) + vec3(0.7, 0.7, 1.0) * STORM_FLASH * n;
+    }
+    if (style == 4) {
+        vec2 q = (p - openingCenter()) / vec2(OPENING_W * 0.5, OPENING_H * 0.5);
+        float r = length(q), a = atan(q.y, q.x);
+        float arms = 0.5 + 0.5 * sin(a * 2.0 - r * 10.0 + time * 1.8);
+        return vec3(0.25, 0.05, 0.4) * arms * smoothstep(0.1, 1.0, r) * 0.8;
+    }
+    vec2 cell = floor(p * 2.2);
+    float n = noise2(p * 2.0);
+    float crack = 1.0 - smoothstep(0.0, 0.05, abs(noise2(p * 3.5 + 11.0) - 0.5));
+    return mix(vec3(0.55, 0.75, 0.9), vec3(0.85, 0.95, 1.0), n) - vec3(0.25, 0.15, 0.05) * crack + 0.05 * hash2(cell);
+}
+
 void main() {
     vec4 base = texture(InSampler, texCoord);
     fragColor = base;
@@ -312,12 +510,12 @@ void main() {
                      vec4(readData(8), readData(9), readData(10), readData(11)), vec4(readData(12), readData(13), readData(14), readData(15)));
     mat3 rotation = mat3(vec3(readData(16), readData(17), readData(18)), vec3(readData(20), readData(21), readData(22)), vec3(readData(24), readData(25), readData(26)));
     vec3 camera = vec3(readData(19), readData(23), readData(27));   // origin of view space, local
-    int sceneAndFacing = int(readData(28) + 0.5);
-    int scene = sceneAndFacing & 15;
-    int facing = sceneAndFacing >> 4;                   // 0 south, 1 west, 2 north, 3 east
-    // marker code = 1 + style + 2*(no inside view) + 4*(width-1) + 32*(height-1)
+    int sceneData = int(readData(28) + 0.5);            // scene + 16*facing + 64*(style>>1)
+    int scene = sceneData & 15;
+    int facing = (sceneData >> 4) & 3;                  // 0 south, 1 west, 2 north, 3 east
+    // marker code = 1 + (style&1) + 2*(no inside view) + 4*(width-1) + 32*(height-1)
     int code = int(readData(30) + 0.5) - 1;
-    int style = code & 1;                               // 0 = gate, 1 = rift
+    int style = (sceneData >> 6) * 2 + (code & 1);      // 0 gate, 1 rift, 2 inferno, 3 storm, 4 void, 5 frost
     bool insideView = ((code >> 1) & 1) == 0;
     OPENING_W = float(((code >> 2) & 7) + 1);
     OPENING_H = float(((code >> 5) & 7) + 1);
@@ -326,6 +524,7 @@ void main() {
     RIFT_HEIGHT = OPENING_H * 1.533;
     RIFT_HALF_WIDTH = 0.8 * OPENING_W / 3.0;
     float time = readData(31) * 1200.0;                 // seconds within one game day
+    STORM_FLASH = style == 3 ? stormFlash(time) : 0.0;
     if (scene < 0 || scene >= DP_SCENES) return;
 
     // The eye is the point the projection maps to w = 0. View bobbing lives in the projection
@@ -377,6 +576,31 @@ void main() {
         vec3 color = edgeDist < 0.0 ? march(hit + d * 1e-3, d, scene) : base.rgb * riftHem(edgeDist, angle);
         if (edgeDist < 0.0) color *= mix(1.0, 0.55, exp(edgeDist * 9.0));          // darker rim inside
         fragColor = vec4(color + riftGlow(hit.xy, edgeDist, angle, time), 1.0);
+    } else if (eye.z > 0.0 && style >= 2) {
+        // inferno, storm, void, frost seen from the front
+        if (d.z >= -1e-4) return;
+        float tPlane = -eye.z / d.z;
+        vec3 hit = eye + d * tPlane;
+        if (sceneDist < tPlane - 0.03) return;
+        float angle;
+        float e = styleDistance(style, hit.xy, time, angle);
+        if (e > styleReach(style)) return;
+        vec3 color;
+        if (e < 0.0) {
+            vec3 start = hit;
+            if (style == 2) {
+                // heat shimmer near the edge
+                float s = exp(e * 3.0) * 0.08;
+                start.xy += s * vec2(noise2(hit.xy * 5.0 + vec2(0.0, -time * 4.0)) - 0.5, noise2(hit.xy * 5.0 + vec2(5.0, -time * 4.0)) - 0.5);
+            } else if (style == 4) {
+                // the vortex twists the view towards its rim
+                float twist = 0.6 * exp(e * 2.0) * (0.8 + 0.2 * sin(time));
+                vec2 c = openingCenter(), q = hit.xy - c;
+                start.xy = c + mat2(cos(twist), sin(twist), -sin(twist), cos(twist)) * q;
+            }
+            color = styleInside(style, march(start + d * 1e-3, d, scene), hit.xy, e, time);
+        } else color = styleOutside(style, hit.xy, e, angle, time, base.rgb);
+        fragColor = vec4(color + styleGlow(style, hit.xy, e, angle, time), 1.0);
     } else if (insideView && eye.z > -INSIDE_DEPTH && eye.z <= 0.0 && inOpening(eye.xy)) {
         // The camera flew through the opening: the whole screen shows the destination world in all
         // directions, without the portal, as if you had really walked through. In game there are
@@ -393,5 +617,16 @@ void main() {
         if (edgeDist > 1.2) return;
         vec3 color = edgeDist < 0.0 ? riftNebula(hit.xy, time) : base.rgb * riftHem(edgeDist, angle);
         fragColor = vec4(color + riftGlow(hit.xy, edgeDist, angle, time), 1.0);
+    } else if (eye.z <= 0.0 && style >= 2) {
+        // inferno, storm, void, frost seen from behind: their own surface instead of the destination
+        if (d.z <= 1e-4) return;
+        float tPlane = -eye.z / d.z;
+        vec3 hit = eye + d * tPlane;
+        if (sceneDist < tPlane - 0.03) return;
+        float angle;
+        float e = styleDistance(style, hit.xy, time, angle);
+        if (e > styleReach(style)) return;
+        vec3 color = e < 0.0 ? styleBack(style, hit.xy, time) : styleOutside(style, hit.xy, e, angle, time, base.rgb);
+        fragColor = vec4(color + styleGlow(style, hit.xy, e, angle, time), 1.0);
     }
 }

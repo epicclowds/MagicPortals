@@ -30,7 +30,10 @@ public final class Portal {
     public final String target, name;
     public final int x, y, z, width, height;
     public final Facing facing;
-    public final boolean rift;         // style "rift": floating dimensional crack instead of a gate
+    public final Style style;
+    public final boolean rift;         // any free-standing style (everything except gate): no wall
+    public final boolean sound;        // ambient sounds (opt-in)
+    public final float volume;         // their volume, 1 = normal
     public final boolean insideView;   // cameras can fly "into" the destination behind the opening
     public final boolean barriers;     // with insideView: invisible barriers keep players out of the space behind
     public final boolean showLabel;    // floating name above the portal
@@ -67,10 +70,12 @@ public final class Portal {
     public record Capture(String key, Snapshot front, Snapshot back) { }
 
     public Portal(Plugin plugin, World world, String target, String name, int x, int y, int z, Facing facing, int width, int height,
-                  Material outer, Material inner, boolean rift, boolean insideView, boolean barriers, boolean showLabel, String offlineLabel) {
+                  Material outer, Material inner, Style style, boolean insideView, boolean barriers, boolean showLabel,
+                  boolean sound, float volume, String offlineLabel) {
         this.plugin = plugin; this.world = world; this.target = target; this.name = name;
         this.x = x; this.y = y; this.z = z; this.facing = facing;
-        this.outer = outer; this.inner = inner; this.rift = rift; this.insideView = insideView; this.barriers = barriers; this.showLabel = showLabel;
+        this.outer = outer; this.inner = inner; this.style = style; this.rift = style != Style.GATE; this.insideView = insideView;
+        this.sound = sound; this.volume = Math.max(0f, volume); this.barriers = barriers; this.showLabel = showLabel;
         this.width = Math.max(1, Math.min(MAX_SIZE, width));
         this.height = Math.max(1, Math.min(MAX_SIZE, height));
         this.anchor = (this.width - 1) / 2;
@@ -109,7 +114,7 @@ public final class Portal {
     }
 
     /** Marker glow green channel: 1 + style + 2*(no inside view) + 4*(width-1) + 32*(height-1). */
-    private int markerCode() { return 1 + (rift ? 1 : 0) + (insideView ? 0 : 2) + 4 * (width - 1) + 32 * (height - 1); }
+    private int markerCode() { return 1 + (style.index() & 1) + (insideView ? 0 : 2) + 4 * (width - 1) + 32 * (height - 1); }
 
     // ---------- building ----------
 
@@ -145,7 +150,7 @@ public final class Portal {
         if (insideView && barriers) for (int i = 0; i < width; i++) for (int j = 0; j < height; j++) for (int k = -3; k <= -1; k++) barrier(i, j, k);
         if (rift) buildRift(); else if (outer != null) buildWall();
         // Marker for the portal shader at the local origin. Its glow colour carries scene, facing, style,
-        // options and size (R=254, G=markerCode, B=160+scene+16*facing).
+        // options and size (R=254-(style>>1), G=markerCode, B=160+scene+16*facing).
         marker = world.spawn(origin, BlockDisplay.class, d -> {
             d.setPersistent(false);
             d.setBlock(Material.WHITE_CONCRETE.createBlockData());
@@ -155,7 +160,7 @@ public final class Portal {
         decoration.add(marker);
         setScene(scene);
         if (!showLabel) return;
-        double labelHeight = rift ? height * 1.53 + .5 : height + (outer != null ? 2.5 : 1.0), labelZ = rift || outer == null ? .5 : 1.2;
+        double labelHeight = style == Style.RIFT ? height * 1.53 + .5 : rift ? height + 1.4 : height + (outer != null ? 2.5 : 1.0), labelZ = rift || outer == null ? .5 : 1.2;
         label = world.spawn(at(width / 2.0, labelHeight, labelZ), TextDisplay.class, d -> {
             d.setPersistent(false); d.setBillboard(Display.Billboard.CENTER); d.setShadowed(true);
         });
@@ -165,8 +170,9 @@ public final class Portal {
 
     /** Rift: no wall, only invisible light so the surroundings look lit by the rift. */
     private void buildRift() {
-        helperBlock(cell(anchor, 1, 1), Material.LIGHT, 12);
-        helperBlock(cell(anchor, height, 1), Material.LIGHT, 9);
+        int glow = switch (style) { case INFERNO -> 15; case VOID -> 7; case FROST -> 10; default -> 12; };
+        helperBlock(cell(anchor, 1, 1), Material.LIGHT, glow);
+        helperBlock(cell(anchor, height, 1), Material.LIGHT, Math.max(0, glow - 3));
     }
 
     /** Thick wall of block displays (2 blocks around the opening, 1 deep), barriers inside the wall. */
@@ -206,7 +212,7 @@ public final class Portal {
         if (marker == null) return;
         if (newScene == null || newScene < 0 || newScene >= 16) { marker.setGlowing(false); return; }
         marker.setGlowing(true);
-        marker.setGlowColorOverride(Color.fromRGB(254, markerCode(), 160 + newScene + 16 * facing.index));
+        marker.setGlowColorOverride(Color.fromRGB(254 - (style.index() >> 1), markerCode(), 160 + newScene + 16 * facing.index));
     }
 
     private void updateLabel() {
@@ -377,8 +383,173 @@ public final class Portal {
         return at(width / 2.0 + side * half + (random.nextDouble() - .5) * .3, -.25 + height * 1.533 * t, .02);
     }
 
+    /** Random point on the edge of the opening of the styles inferno, storm, void and frost (as in the shader). */
+    private Location edge(double outside) {
+        if (style == Style.RIFT) return riftEdge(outside);
+        var random = ThreadLocalRandom.current();
+        double w = width, h = height;
+        if (style == Style.INFERNO) {
+            // pointed arch: straight sides, elliptic top
+            double r = Math.min(w * .5, h * .45), top = h - r;
+            if (random.nextDouble() < top / (top + r * 1.6)) {
+                boolean left = random.nextBoolean();
+                return at(left ? -outside : w + outside, random.nextDouble() * top, .02);
+            }
+            double t = random.nextDouble() * Math.PI;
+            return at(w / 2 + Math.cos(t) * (w / 2 + outside), top + Math.sin(t) * (r + outside), .02);
+        }
+        double ry = h / 2 + (style == Style.STORM ? .1 : style == Style.FROST ? .05 : 0);
+        double t = random.nextDouble() * 2 * Math.PI;
+        return at(w / 2 + Math.cos(t) * (w / 2 + outside), h / 2 + Math.sin(t) * (ry + outside), .02);
+    }
+
+    /** Plays an ambient sound if sounds are enabled for this portal, scaled by its volume. */
+    private void sound(Player p, Location at, String key, float volume, float pitch) {
+        if (sound && this.volume > 0) p.playSound(at, key, SoundCategory.AMBIENT, volume * this.volume, pitch);
+    }
+
+    private static float pitch(float min, float max) { return min + ThreadLocalRandom.current().nextFloat() * (max - min); }
+
+    /** Called every 4 ticks. */
     public void particles() {
-        if (rift) { riftParticles(); return; }
+        ticks++;
+        switch (style) {
+            case GATE -> gateParticles();
+            case RIFT -> riftParticles();
+            case INFERNO -> infernoParticles();
+            case STORM -> stormParticles();
+            case VOID -> voidParticles();
+            case FROST -> frostParticles();
+        }
+    }
+
+    /** Players close enough to see and hear the portal's effects. */
+    private List<Player> audience(Location centre, double distance) {
+        var list = new ArrayList<Player>();
+        for (Player p : world.getPlayers()) if (p.getLocation().distanceSquared(centre) <= distance * distance) list.add(p);
+        return list;
+    }
+
+    private static final Particle.DustOptions[] EMBERS = {
+            new Particle.DustOptions(Color.fromRGB(255, 120, 20), 0.8f),
+            new Particle.DustOptions(Color.fromRGB(255, 200, 60), 0.6f),
+            new Particle.DustOptions(Color.fromRGB(200, 40, 10), 0.9f)};
+
+    private void infernoParticles() {
+        var random = ThreadLocalRandom.current();
+        Location centre = at(width / 2.0, height / 2.0, 0);
+        for (Player p : audience(centre, 32)) {
+            for (int i = 0; i < 5; i++) p.spawnParticle(Particle.FLAME, edge(random.nextDouble() * .15), 0, 0, 1, 0, .03 + random.nextDouble() * .05);
+            for (int i = 0; i < 2; i++) p.spawnParticle(Particle.SMALL_FLAME, edge(.1), 0, 0, 1, 0, .04);
+            for (int i = 0; i < 2; i++) p.spawnParticle(Particle.DUST, edge(random.nextDouble() * .6), 1, .1, .3, .1, 0, EMBERS[random.nextInt(EMBERS.length)]);
+            if (random.nextInt(4) == 0) p.spawnParticle(Particle.LAVA, edge(0), 1, 0, 0, 0, 0);
+            if (random.nextInt(3) == 0) p.spawnParticle(Particle.LARGE_SMOKE, at(width / 2.0, height + .3, .1), 0, (random.nextDouble() - .5) * .1, 1, 0, .05);
+            if (p.getLocation().distanceSquared(centre) > 256) continue;
+            if (random.nextInt(5) == 0) sound(p, centre, "minecraft:block.fire.ambient", .6f, pitch(.8f, 1.2f));
+            if (random.nextInt(12) == 0) sound(p, centre, "minecraft:block.lava.pop", .5f, pitch(.8f, 1.2f));
+            if (random.nextInt(40) == 0) sound(p, centre, "minecraft:block.lava.ambient", .4f, pitch(.8f, 1.0f));
+            if (random.nextInt(60) == 0) sound(p, centre, "minecraft:entity.blaze.burn", .3f, pitch(.6f, .9f));
+        }
+    }
+
+    private static final Particle.DustOptions[] STORM_DUST = {
+            new Particle.DustOptions(Color.fromRGB(150, 120, 255), 1.0f),
+            new Particle.DustOptions(Color.fromRGB(235, 235, 255), 0.8f)};
+    private static final Particle.DustOptions BOLT = new Particle.DustOptions(Color.fromRGB(235, 235, 255), 1.6f);
+    private static final Particle.DustOptions BOLT_GLOW = new Particle.DustOptions(Color.fromRGB(150, 130, 255), 2.2f);
+
+    private void stormParticles() {
+        var random = ThreadLocalRandom.current();
+        Location centre = at(width / 2.0, height / 2.0, 0);
+        List<Player> players = audience(centre, 48);
+        if (players.isEmpty()) return;
+        for (Player p : players) {
+            for (int i = 0; i < 4; i++) p.spawnParticle(Particle.ELECTRIC_SPARK, edge(random.nextDouble() * .2), 2, .1, .1, .1, .08);
+            for (int i = 0; i < 3; i++) p.spawnParticle(Particle.DUST, edge(random.nextDouble() * .3), 1, .03, .03, .03, 0, STORM_DUST[random.nextInt(STORM_DUST.length)]);
+            if (p.getLocation().distanceSquared(centre) > 400) continue;
+            if (ticks % 25 == 0) sound(p, centre, "minecraft:block.beacon.ambient", .4f, .5f);
+            if (random.nextInt(10) == 0) sound(p, centre, "minecraft:entity.lightning_bolt.impact", .12f, pitch(1.6f, 2f));
+        }
+        // a lightning bolt strikes in front of the portal every few seconds
+        if (random.nextInt(12) == 0) strike(players);
+    }
+
+    /** A harmless lightning strike: a jagged bolt of particles from the sky, a flash of light and thunder. */
+    private void strike(List<Player> players) {
+        var random = ThreadLocalRandom.current();
+        Location spot = at(random.nextDouble(-3, width + 3), 0, random.nextDouble(1.5, 7));
+        int ground = world.getHighestBlockYAt(spot.getBlockX(), spot.getBlockZ(), HeightMap.MOTION_BLOCKING);
+        if (Math.abs(ground + 1 - y) > 6) ground = y - 1;
+        Location impact = new Location(world, spot.getX(), ground + 1, spot.getZ());
+        // zig-zag path from 16 blocks up down to the ground
+        var points = new ArrayList<Location>();
+        double px = impact.getX(), pz = impact.getZ();
+        for (double h = 16; h >= 0; h -= .25) {
+            if ((int) (h * 4) % 6 == 0) { px += random.nextDouble(-.5, .5); pz += random.nextDouble(-.5, .5); }
+            double fade = h / 16;
+            points.add(new Location(world, px + (impact.getX() - px) * (1 - fade) * .6, impact.getY() + h, pz + (impact.getZ() - pz) * (1 - fade) * .6));
+        }
+        Block lightSpot = impact.getBlock();
+        boolean light = lightSpot.getType().isAir();
+        BlockData lightData = Material.LIGHT.createBlockData(d -> ((Levelled) d).setLevel(15));
+        for (Player p : players) {
+            for (Location l : points) {
+                p.spawnParticle(Particle.DUST, l, 1, 0, 0, 0, 0, BOLT);
+                p.spawnParticle(Particle.DUST, l, 1, .08, .08, .08, 0, BOLT_GLOW);
+            }
+            p.spawnParticle(Particle.ELECTRIC_SPARK, impact, 30, .4, .1, .4, .3);
+            p.spawnParticle(Particle.FIREWORK, impact, 12, .2, .1, .2, .15);
+            p.spawnParticle(Particle.LARGE_SMOKE, impact, 6, .3, .1, .3, .02);
+            if (light) p.sendBlockChange(lightSpot.getLocation(), lightData);
+            sound(p, impact, "minecraft:entity.lightning_bolt.impact", 1.0f, pitch(.8f, 1.1f));
+            sound(p, impact, "minecraft:entity.lightning_bolt.thunder", .5f, pitch(.8f, 1.2f));
+        }
+        if (light) Bukkit.getScheduler().runTaskLater(plugin, () -> {
+            for (Player p : players) if (p.isOnline()) p.sendBlockChange(lightSpot.getLocation(), lightSpot.getBlockData());
+        }, 4);
+    }
+
+    private static final Particle.DustOptions[] VOID_DUST = {
+            new Particle.DustOptions(Color.fromRGB(140, 40, 240), 1.0f),
+            new Particle.DustOptions(Color.fromRGB(240, 90, 220), 0.8f),
+            new Particle.DustOptions(Color.fromRGB(20, 0, 40), 1.2f)};
+
+    private void voidParticles() {
+        var random = ThreadLocalRandom.current();
+        Location centre = at(width / 2.0, height / 2.0, 0);
+        for (Player p : audience(centre, 32)) {
+            // particles of the surroundings are sucked into the vortex
+            for (int i = 0; i < 3; i++) p.spawnParticle(Particle.PORTAL, edge(random.nextDouble() * .3), 2, .2, .2, .2, .6);
+            for (int i = 0; i < 2; i++) p.spawnParticle(Particle.REVERSE_PORTAL, edge(.8 + random.nextDouble()), 1, .2, .2, .2, .02);
+            for (int i = 0; i < 3; i++) p.spawnParticle(Particle.DUST, edge(random.nextDouble() * .25), 1, .03, .03, .03, 0, VOID_DUST[random.nextInt(VOID_DUST.length)]);
+            if (random.nextInt(6) == 0) p.spawnParticle(Particle.SQUID_INK, edge(.1), 0, 0, 0, 0, 0);
+            if (p.getLocation().distanceSquared(centre) > 256) continue;
+            if (random.nextInt(14) == 0) sound(p, centre, "minecraft:block.portal.ambient", .25f, pitch(.5f, .8f));
+            if (ticks % 25 == 0) sound(p, centre, "minecraft:block.beacon.ambient", .35f, .5f);
+            if (random.nextInt(60) == 0) sound(p, centre, "minecraft:entity.enderman.teleport", .3f, pitch(.5f, .7f));
+        }
+    }
+
+    private static final Particle.DustOptions[] FROST_DUST = {
+            new Particle.DustOptions(Color.fromRGB(170, 230, 255), 0.9f),
+            new Particle.DustOptions(Color.fromRGB(240, 250, 255), 0.7f)};
+
+    private void frostParticles() {
+        var random = ThreadLocalRandom.current();
+        Location centre = at(width / 2.0, height / 2.0, 0);
+        for (Player p : audience(centre, 32)) {
+            for (int i = 0; i < 3; i++) p.spawnParticle(Particle.SNOWFLAKE, edge(random.nextDouble() * .4), 1, .1, .1, .1, .01);
+            for (int i = 0; i < 3; i++) p.spawnParticle(Particle.DUST, edge(random.nextDouble() * .2), 1, .03, .03, .03, 0, FROST_DUST[random.nextInt(FROST_DUST.length)]);
+            if (random.nextInt(3) == 0) p.spawnParticle(Particle.END_ROD, edge(random.nextDouble() * .5), 0, 0, -1, 0, .01);
+            if (random.nextInt(2) == 0) p.spawnParticle(Particle.SNOWFLAKE, at(random.nextDouble(-1, width + 1), height + 1.5, random.nextDouble(.2, 2.5)), 0, 0, -1, 0, .03);
+            if (p.getLocation().distanceSquared(centre) > 256) continue;
+            if (random.nextInt(8) == 0) sound(p, centre, "minecraft:block.amethyst_block.chime", .4f, pitch(1.2f, 1.9f));
+            if (random.nextInt(25) == 0) sound(p, centre, "minecraft:block.amethyst_cluster.hit", .25f, pitch(1.4f, 2f));
+            if (random.nextInt(30) == 0) sound(p, centre, "minecraft:block.powder_snow.step", .4f, pitch(.7f, 1f));
+        }
+    }
+
+    private void gateParticles() {
         var random = ThreadLocalRandom.current();
         Location centre = at(width / 2.0, height / 2.0, 0);
         for (Player p : world.getPlayers()) {
@@ -393,13 +564,13 @@ public final class Portal {
                 p.spawnParticle(reachable ? Particle.END_ROD : Particle.SMOKE, at(px, py, .05), 0, 0, .02, 0, .3);
             }
             if (!reachable) p.spawnParticle(Particle.PORTAL, at(width / 2.0, height / 2.0, .1), 12, width * .3, height * .3, width * .3, .2);
+            if (ticks % 25 == 0 && p.getLocation().distanceSquared(centre) < 144) sound(p, centre, "minecraft:block.beacon.ambient", .25f, 1.2f);
         }
     }
 
     private void riftParticles() {
         var random = ThreadLocalRandom.current();
         Location centre = at(width / 2.0, height * .55, 0);
-        ticks++;
         for (Player p : world.getPlayers()) {
             double distance = p.getLocation().distanceSquared(centre);
             if (distance > 900) continue;
@@ -409,9 +580,9 @@ public final class Portal {
             // particles from the surroundings are pulled into the rift
             if (random.nextInt(2) == 0) p.spawnParticle(Particle.REVERSE_PORTAL, riftEdge(1.0), 1, .2, .2, .2, .02);
             if (distance > 256) continue;
-            if (ticks % 20 == 0) p.playSound(centre, "minecraft:block.beacon.ambient", .35f, 1.5f);
-            if (random.nextInt(45) == 0) p.playSound(centre, "minecraft:block.amethyst_block.resonate", .25f, .6f + random.nextFloat() * .4f);
-            if (random.nextInt(70) == 0) p.playSound(centre, "minecraft:entity.lightning_bolt.impact", .06f, 1.8f);
+            if (ticks % 20 == 0) sound(p, centre, "minecraft:block.beacon.ambient", .35f, 1.5f);
+            if (random.nextInt(45) == 0) sound(p, centre, "minecraft:block.amethyst_block.resonate", .25f, pitch(.6f, 1f));
+            if (random.nextInt(70) == 0) sound(p, centre, "minecraft:entity.lightning_bolt.impact", .06f, 1.8f);
         }
     }
 
