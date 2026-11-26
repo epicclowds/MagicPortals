@@ -411,9 +411,30 @@ public final class Portal {
         return at(w / 2 + Math.cos(t) * (rx + outside), h / 2 + Math.sin(t) * (ry + outside), .02);
     }
 
-    /** Plays an ambient sound if sounds are enabled for this portal, scaled by its volume. */
-    private void sound(Player p, Location at, String key, float volume, float pitch) {
-        if (sound && this.volume > 0) p.playSound(at, key, SoundCategory.AMBIENT, volume * this.volume, pitch);
+    /** Sound slots a portal can play; each can be replaced by a custom sound (option "sounds"). */
+    public static final List<String> SOUND_SLOTS = List.of("ambient", "hum", "accent", "crackle", "strike", "thunder", "enter");
+
+    /** Custom sounds per slot ("none" = silent), set by the plugin from the config. */
+    public final Map<String, String> customSounds = new HashMap<>();
+
+    /**
+     * Plays the sound of a slot if sounds are enabled for this portal, scaled by its volume. A custom sound
+     * replaces the built-in one and plays at full volume and normal pitch.
+     */
+    private void sound(Player p, Location at, String slot, String key, float volume, float pitch) {
+        if (!sound || this.volume <= 0) return;
+        String custom = customSounds.get(slot);
+        if (custom != null) {
+            if (custom.equals("none")) return;
+            key = custom; volume = 1f; pitch = 1f;
+        }
+        p.playSound(at, key, SoundCategory.AMBIENT, volume * this.volume, pitch);
+    }
+
+    /** Sound for a player walking through (slot "enter"; silent unless a sound is configured). */
+    public void playEnter(Player p) {
+        String custom = customSounds.get("enter");
+        if (sound && custom != null && !custom.equals("none")) p.playSound(p, custom, SoundCategory.AMBIENT, this.volume, 1f);
     }
 
     private static float pitch(float min, float max) { return min + ThreadLocalRandom.current().nextFloat() * (max - min); }
@@ -505,10 +526,10 @@ public final class Portal {
             if (random.nextInt(4) == 0) p.spawnParticle(Particle.LAVA, edge(0), 1, 0, 0, 0, 0);
             if (random.nextInt(3) == 0) p.spawnParticle(Particle.LARGE_SMOKE, at(width / 2.0, height + .3, .1), 0, (random.nextDouble() - .5) * .1, 1, 0, .05);
             if (p.getLocation().distanceSquared(centre) > 256) continue;
-            if (random.nextInt(5) == 0) sound(p, centre, "minecraft:block.fire.ambient", .6f, pitch(.8f, 1.2f));
-            if (random.nextInt(12) == 0) sound(p, centre, "minecraft:block.lava.pop", .5f, pitch(.8f, 1.2f));
-            if (random.nextInt(40) == 0) sound(p, centre, "minecraft:block.lava.ambient", .4f, pitch(.8f, 1.0f));
-            if (random.nextInt(60) == 0) sound(p, centre, "minecraft:entity.blaze.burn", .3f, pitch(.6f, .9f));
+            if (random.nextInt(5) == 0) sound(p, centre, "ambient", "minecraft:block.fire.ambient", .6f, pitch(.8f, 1.2f));
+            if (random.nextInt(12) == 0) sound(p, centre, "crackle", "minecraft:block.lava.pop", .5f, pitch(.8f, 1.2f));
+            if (random.nextInt(40) == 0) sound(p, centre, "accent", "minecraft:block.lava.ambient", .4f, pitch(.8f, 1.0f));
+            if (random.nextInt(60) == 0) sound(p, centre, "hum", "minecraft:entity.blaze.burn", .3f, pitch(.6f, .9f));
         }
     }
 
@@ -527,8 +548,8 @@ public final class Portal {
             for (int i = 0, k = n(4); i < k; i++) p.spawnParticle(Particle.ELECTRIC_SPARK, edge(random.nextDouble() * .2), 2, .1, .1, .1, .08);
             for (int i = 0, k = n(3); i < k; i++) p.spawnParticle(Particle.DUST, edge(random.nextDouble() * .3), 1, .03, .03, .03, 0, STORM_DUST[random.nextInt(STORM_DUST.length)]);
             if (p.getLocation().distanceSquared(centre) > 400) continue;
-            if (ticks % 25 == 0) sound(p, centre, "minecraft:block.beacon.ambient", .4f, .5f);
-            if (random.nextInt(10) == 0) sound(p, centre, "minecraft:entity.lightning_bolt.impact", .12f, pitch(1.6f, 2f));
+            if (ticks % 25 == 0) sound(p, centre, "hum", "minecraft:block.beacon.ambient", .4f, .5f);
+            if (random.nextInt(10) == 0) sound(p, centre, "crackle", "minecraft:entity.lightning_bolt.impact", .12f, pitch(1.6f, 2f));
         }
         // a lightning bolt strikes in front of the portal every few seconds
         if (random.nextInt(12) == 0) strike(players);
@@ -561,8 +582,8 @@ public final class Portal {
             p.spawnParticle(Particle.FIREWORK, impact, 12, .2, .1, .2, .15);
             p.spawnParticle(Particle.LARGE_SMOKE, impact, 6, .3, .1, .3, .02);
             if (light) p.sendBlockChange(lightSpot.getLocation(), lightData);
-            sound(p, impact, "minecraft:entity.lightning_bolt.impact", 1.0f, pitch(.8f, 1.1f));
-            sound(p, impact, "minecraft:entity.lightning_bolt.thunder", .5f, pitch(.8f, 1.2f));
+            sound(p, impact, "strike", "minecraft:entity.lightning_bolt.impact", 1.0f, pitch(.8f, 1.1f));
+            sound(p, impact, "thunder", "minecraft:entity.lightning_bolt.thunder", .5f, pitch(.8f, 1.2f));
             if (effects && p.getLocation().distanceSquared(impact) < 36) p.sendHurtAnimation((float) random.nextDouble(0, 360));
         }
         if (light) Bukkit.getScheduler().runTaskLater(plugin, () -> {
@@ -585,9 +606,9 @@ public final class Portal {
             for (int i = 0, k = n(3); i < k; i++) p.spawnParticle(Particle.DUST, edge(random.nextDouble() * .25), 1, .03, .03, .03, 0, VOID_DUST[random.nextInt(VOID_DUST.length)]);
             if (random.nextInt(6) == 0) p.spawnParticle(Particle.SQUID_INK, edge(.1), 0, 0, 0, 0, 0);
             if (p.getLocation().distanceSquared(centre) > 256) continue;
-            if (random.nextInt(14) == 0) sound(p, centre, "minecraft:block.portal.ambient", .25f, pitch(.5f, .8f));
-            if (ticks % 25 == 0) sound(p, centre, "minecraft:block.beacon.ambient", .35f, .5f);
-            if (random.nextInt(60) == 0) sound(p, centre, "minecraft:entity.enderman.teleport", .3f, pitch(.5f, .7f));
+            if (random.nextInt(14) == 0) sound(p, centre, "ambient", "minecraft:block.portal.ambient", .25f, pitch(.5f, .8f));
+            if (ticks % 25 == 0) sound(p, centre, "hum", "minecraft:block.beacon.ambient", .35f, .5f);
+            if (random.nextInt(60) == 0) sound(p, centre, "accent", "minecraft:entity.enderman.teleport", .3f, pitch(.5f, .7f));
         }
     }
 
@@ -604,9 +625,9 @@ public final class Portal {
             if (random.nextInt(3) == 0) p.spawnParticle(Particle.END_ROD, edge(random.nextDouble() * .5), 0, 0, -1, 0, .01);
             if (random.nextInt(2) == 0) p.spawnParticle(Particle.SNOWFLAKE, at(random.nextDouble(-1, width + 1), height + 1.5, random.nextDouble(.2, 2.5)), 0, 0, -1, 0, .03);
             if (p.getLocation().distanceSquared(centre) > 256) continue;
-            if (random.nextInt(8) == 0) sound(p, centre, "minecraft:block.amethyst_block.chime", .4f, pitch(1.2f, 1.9f));
-            if (random.nextInt(25) == 0) sound(p, centre, "minecraft:block.amethyst_cluster.hit", .25f, pitch(1.4f, 2f));
-            if (random.nextInt(30) == 0) sound(p, centre, "minecraft:block.powder_snow.step", .4f, pitch(.7f, 1f));
+            if (random.nextInt(8) == 0) sound(p, centre, "ambient", "minecraft:block.amethyst_block.chime", .4f, pitch(1.2f, 1.9f));
+            if (random.nextInt(25) == 0) sound(p, centre, "accent", "minecraft:block.amethyst_cluster.hit", .25f, pitch(1.4f, 2f));
+            if (random.nextInt(30) == 0) sound(p, centre, "crackle", "minecraft:block.powder_snow.step", .4f, pitch(.7f, 1f));
         }
     }
 
@@ -625,7 +646,7 @@ public final class Portal {
                 p.spawnParticle(reachable ? Particle.END_ROD : Particle.SMOKE, at(px, py, .05), 0, 0, .02, 0, .3);
             }
             if (!reachable) p.spawnParticle(Particle.PORTAL, at(width / 2.0, height / 2.0, .1), 12, width * .3, height * .3, width * .3, .2);
-            if (ticks % 25 == 0 && p.getLocation().distanceSquared(centre) < 144) sound(p, centre, "minecraft:block.beacon.ambient", .25f, 1.2f);
+            if (ticks % 25 == 0 && p.getLocation().distanceSquared(centre) < 144) sound(p, centre, "hum", "minecraft:block.beacon.ambient", .25f, 1.2f);
         }
     }
 
@@ -641,9 +662,9 @@ public final class Portal {
             // particles from the surroundings are pulled into the rift
             if (random.nextInt(2) == 0) p.spawnParticle(Particle.REVERSE_PORTAL, riftEdge(1.0), 1, .2, .2, .2, .02);
             if (distance > 256) continue;
-            if (ticks % 20 == 0) sound(p, centre, "minecraft:block.beacon.ambient", .35f, 1.5f);
-            if (random.nextInt(45) == 0) sound(p, centre, "minecraft:block.amethyst_block.resonate", .25f, pitch(.6f, 1f));
-            if (random.nextInt(70) == 0) sound(p, centre, "minecraft:entity.lightning_bolt.impact", .06f, 1.8f);
+            if (ticks % 20 == 0) sound(p, centre, "hum", "minecraft:block.beacon.ambient", .35f, 1.5f);
+            if (random.nextInt(45) == 0) sound(p, centre, "accent", "minecraft:block.amethyst_block.resonate", .25f, pitch(.6f, 1f));
+            if (random.nextInt(70) == 0) sound(p, centre, "crackle", "minecraft:entity.lightning_bolt.impact", .06f, 1.8f);
         }
     }
 

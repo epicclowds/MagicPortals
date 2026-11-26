@@ -116,6 +116,46 @@ Change a portal's look at any time with `/mp edit <server> style <name>` (or `/m
 
 Sounds are off by default (`sound: false`). The lightning strikes of `storm` are only particles, a short flash of light (client-side) and – with sound on – thunder for nearby players; they do no damage, start no fires and are not heard across the whole world like real lightning.
 
+## Custom sounds
+
+With `sound: true` every style plays its own sounds. Each sound **slot** can be replaced – by any Minecraft sound, a sound from another resource pack (Oraxen, ItemsAdder, …) or your own `.ogg` files.
+
+| Slot | Plays | Built-in sound |
+|---|---|---|
+| `ambient` | often, the main background sound | fire (inferno), portal whoosh (void), chimes (frost) |
+| `hum` | every 4–5 s | beacon hum (gate, rift, storm, void), blaze (inferno) |
+| `accent` | now and then | amethyst (rift, frost), lava (inferno), enderman (void) |
+| `crackle` | short, frequent | small lightning (rift, storm), lava pop (inferno), snow steps (frost) |
+| `strike` | storm: lightning hits the ground | lightning impact |
+| `thunder` | storm: with every strike | thunder |
+| `enter` | to the player walking through | – (silent unless set) |
+
+```yaml
+portals:
+  boss:
+    sound: true
+    sounds:
+      strike: magicportals:storm      # own files, see below
+      thunder: minecraft:entity.warden.sonic_boom
+      hum: none                       # silent
+      enter: magicportals:whoosh
+```
+
+In game: `/mp edit boss sound.strike magicportals:storm`, `… sound.hum none`, `… sound.hum default`. A custom sound plays at the portal's `volume` and normal pitch.
+
+**Your own files.** Put `.ogg` files (Ogg Vorbis) into `plugins/MagicPortals/sounds/` on the **resource-pack server** and run `/mp update` – they are added to the pack with a generated `sounds.json`:
+
+```
+sounds/whoosh.ogg            ->  magicportals:whoosh
+sounds/storm/thunder1.ogg    ->  magicportals:storm/thunder1
+sounds/storm/thunder2.ogg    ->  magicportals:storm/thunder2
+                                 magicportals:storm   (one of the files in storm/ at random)
+```
+
+- File and folder names: lowercase letters, digits, `_ - .` only.
+- Use **mono** files for sounds that should come from the portal; stereo files are heard at the same volume everywhere.
+- Files above ~300 KB (music, long loops) are streamed automatically.
+
 ## View
 
 The `view` section of a portal changes how the destination looks **through this portal** – it is baked into the scene, so run `/mp update` after changing it. All keys are optional and can also be set with `/mp edit <server> <key> <value>`.

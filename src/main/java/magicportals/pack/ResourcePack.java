@@ -123,6 +123,7 @@ public final class ResourcePack {
             Files.createDirectories(target.getParent());
             Files.writeString(target, text, StandardCharsets.UTF_8);
         }
+        bundleSounds(baked);
         Path zip = plugin.getDataFolder().toPath().resolve("MagicPortals-pack.zip");
         Path tmp = zip.resolveSibling("MagicPortals-pack.zip.part");
         try (var out = new ZipOutputStream(Files.newOutputStream(tmp))) {
@@ -141,6 +142,67 @@ public final class ResourcePack {
         Files.move(tmp, zip, StandardCopyOption.REPLACE_EXISTING);
         loadZip(zip);
         return zip;
+    }
+
+    // ---------- custom sounds ----------
+
+    /** Folder for custom sounds: plugins/MagicPortals/sounds. */
+    public Path soundFolder() { return plugin.getDataFolder().toPath().resolve("sounds"); }
+
+    /** Valid name of a sound file or folder inside the sounds folder (Minecraft resource location rules). */
+    private static final Pattern SOUND_NAME = Pattern.compile("[a-z0-9_./-]+");
+
+    /**
+     * The sound events made from the sounds folder: every .ogg file becomes "magicportals:&lt;path without .ogg&gt;",
+     * every folder with .ogg files "magicportals:&lt;folder&gt;" playing one of its files at random.
+     */
+    public Map<String, List<String>> soundEvents() throws IOException {
+        var events = new TreeMap<String, List<String>>();
+        Path root = soundFolder();
+        if (!Files.isDirectory(root)) return events;
+        try (var files = Files.walk(root)) {
+            for (Path p : files.filter(f -> Files.isRegularFile(f) && f.toString().toLowerCase(Locale.ROOT).endsWith(".ogg")).sorted().toList()) {
+                String rel = root.relativize(p).toString().replace('\\', '/');
+                String name = rel.substring(0, rel.length() - 4);
+                if (!SOUND_NAME.matcher(name).matches()) {
+                    plugin.getLogger().warning("Sound " + rel + " skipped: only lowercase letters, digits, _ - . / are allowed");
+                    continue;
+                }
+                events.computeIfAbsent(name, k -> new ArrayList<>()).add(name);
+                int slash = name.lastIndexOf('/');
+                if (slash > 0) events.computeIfAbsent(name.substring(0, slash), k -> new ArrayList<>()).add(name);
+            }
+        }
+        return events;
+    }
+
+    /** Copies the custom sounds into the pack and writes assets/magicportals/sounds.json. */
+    private void bundleSounds(Path baked) throws IOException {
+        var events = soundEvents();
+        if (events.isEmpty()) return;
+        Path target = baked.resolve("assets/magicportals/sounds");
+        var json = new StringBuilder("{");
+        var copied = new HashSet<String>();
+        for (var event : events.entrySet()) {
+            if (json.length() > 1) json.append(',');
+            json.append("\n  \"").append(event.getKey()).append("\": {\"sounds\": [");
+            for (int i = 0; i < event.getValue().size(); i++) {
+                String file = event.getValue().get(i);
+                Path source = soundFolder().resolve(file + ".ogg");
+                if (copied.add(file)) {
+                    Path t = target.resolve(file + ".ogg");
+                    Files.createDirectories(t.getParent());
+                    Files.copy(source, t, StandardCopyOption.REPLACE_EXISTING);
+                }
+                // long sounds (music, loops) are streamed instead of loaded into memory at once
+                boolean stream = Files.size(source) > 300_000;
+                json.append(i > 0 ? ", " : "").append("{\"name\": \"magicportals:").append(file).append('"').append(stream ? ", \"stream\": true" : "").append('}');
+            }
+            json.append("]}");
+        }
+        json.append("\n}\n");
+        Files.writeString(baked.resolve("assets/magicportals/sounds.json"), json, StandardCharsets.UTF_8);
+        plugin.getLogger().info("Custom sounds: " + events.size() + " sound event(s) from " + copied.size() + " file(s)");
     }
 
     private static void entry(ZipOutputStream out, String name, byte[] data) throws IOException {

@@ -37,6 +37,7 @@ final class Messages {
             Map.entry("edit.invalid", new String[]{"Invalid value {0} for {1}. Possible: {2}", "Ungültiger Wert {0} für {1}. Möglich: {2}"}),
             Map.entry("edit.done", new String[]{"Portal to {0}: {1} is now {2}.", "Tor nach {0}: {1} ist jetzt {2}."}),
             Map.entry("edit.update", new String[]{"Run /mp update on the resource-pack server so the views match again (the counterpart should have the same width).", "Führe /mp update auf dem Ressourcenpaket-Server aus, damit die Ansichten wieder passen (das Gegenstück sollte gleich breit sein)."}),
+            Map.entry("edit.sound", new String[]{"Custom sounds from the sounds folder are part of the resource pack: run /mp update on the resource-pack server after adding new files.", "Eigene Sounds aus dem sounds-Ordner gehören zum Ressourcenpaket: nach neuen Dateien /mp update auf dem Ressourcenpaket-Server ausführen."}),
             Map.entry("reload.done", new String[]{"Config reloaded, {0} portal(s).", "Config neu geladen, {0} Tor(e)."}),
             Map.entry("update.disabled", new String[]{"This server does not build the resource pack (resource-pack.enabled is false). Run the command on that server.", "Dieser Server baut das Ressourcenpaket nicht (resource-pack.enabled ist false). Führe den Befehl auf diesem Server aus."}),
             Map.entry("update.running", new String[]{"An update is already running.", "Läuft schon."}),

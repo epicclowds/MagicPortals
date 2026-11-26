@@ -51,6 +51,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
     @Override public void onEnable() {
         migrateOldConfig();
         saveDefaultConfig();
+        createSoundFolder();
         pack = new ResourcePack(this);
         Bukkit.getMessenger().registerOutgoingPluginChannel(this, "BungeeCord");
         Bukkit.getPluginManager().registerEvents(this, this);
@@ -97,6 +98,28 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
     }
 
     private String exchangeName() { return exchange instanceof MySqlExchange ? "MySQL" : "folder"; }
+
+    /** Creates plugins/MagicPortals/sounds with a short explanation on first start. */
+    private void createSoundFolder() {
+        Path folder = getDataFolder().toPath().resolve("sounds");
+        try {
+            if (Files.isDirectory(folder)) return;
+            Files.createDirectories(folder);
+            Files.writeString(folder.resolve("README.txt"), """
+                    Custom portal sounds (only needed on the server with resource-pack.enabled: true)
+
+                    Put .ogg files (Ogg Vorbis, mono for sounds that come from the portal) into this folder.
+                    Lowercase letters, digits, _ - . only. Subfolders are fine.
+
+                      storm/thunder1.ogg  ->  magicportals:storm/thunder1
+                      storm/thunder2.ogg  ->  magicportals:storm/thunder2
+                                              magicportals:storm  (one of the files in storm/ at random)
+
+                    Then run /mp update and use them, e.g.  /mp edit lobby sound.strike magicportals:storm
+                    Slots: ambient, hum, accent, crackle, strike, thunder, enter. Sounds must be on (sound: true).
+                    """);
+        } catch (IOException e) { getLogger().warning("Could not create " + folder + ": " + e.getMessage()); }
+    }
 
     // ---------- configuration ----------
 
@@ -201,13 +224,19 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             boolean noFrame = "none".equalsIgnoreCase(p.getString("frame"));
             World portalWorld = p.contains("world") ? Bukkit.getWorld(p.getString("world")) : world;
             if (portalWorld == null) { getLogger().warning("Portal to " + target + ": world " + p.getString("world") + " not found – skipped"); continue; }
-            portals.add(new Portal(this, portalWorld, target, name, pos[0], pos[1], pos[2],
+            Portal portal = new Portal(this, portalWorld, target, name, pos[0], pos[1], pos[2],
                     Facing.parse(p.getString("facing", "south")), p.getInt("width", 3), p.getInt("height", 3),
                     noFrame ? null : material(p.getString("frame.outer"), Material.STONE_BRICKS),
                     noFrame ? null : material(p.getString("frame.inner"), Material.POLISHED_BLACKSTONE_BRICKS),
                     style, p.getBoolean("inside-view", false), p.getBoolean("barriers", false), p.getBoolean("label", false),
                     p.getBoolean("sound", false), (float) p.getDouble("volume", 1.0), p.getDouble("particles", 1.0), p.getBoolean("effects", false),
-                    messages.get("offline.sign")));
+                    messages.get("offline.sign"));
+            var sounds = p.getConfigurationSection("sounds");
+            if (sounds != null) for (String slot : Portal.SOUND_SLOTS) {
+                String s = sounds.getString(slot);
+                if (s != null && !s.isBlank()) portal.customSounds.put(slot, s.trim().toLowerCase(Locale.ROOT));
+            }
+            portals.add(portal);
         }
         // the view settings belong to the scene this portal shows, i.e. the snapshot "<target>@<server>"
         async(ex -> { for (var e : viewData.entrySet()) ex.saveSnapshot(e.getKey(), Exchange.VIEW, e.getValue()); return null; }, null);
@@ -336,6 +365,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         if (cooldown.getOrDefault(player.getUniqueId(), 0L) > now) return;
         cooldown.put(player.getUniqueId(), now + 5000);
         if (!portal.reachable()) { player.sendMessage(Component.text(messages.get("offline.message", portal.name))); return; }
+        portal.playEnter(player);
         UUID id = player.getUniqueId();
         String self = server;
         player.playSound(player.getLocation(), "minecraft:block.portal.travel", .35f, 1.25f);
@@ -595,6 +625,8 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         EDITABLE.put("tint", List.of("none", "blue", "red", "green", "purple", "orange", "yellow", "#ff6040"));
         EDITABLE.put("tint-strength", List.of("0.25", "0.5", "0.75", "1"));
         EDITABLE.put("weather", List.of("none", "rain", "snow", "ash", "embers"));
+        // custom sounds per slot, see Portal.SOUND_SLOTS
+        for (String slot : Portal.SOUND_SLOTS) EDITABLE.put("sound." + slot, List.of("default", "none"));
     }
 
     private static final Map<String, String> COLOR_NAMES = Map.ofEntries(
@@ -603,6 +635,24 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             Map.entry("orange", "#ff8020"), Map.entry("yellow", "#ffe040"), Map.entry("gelb", "#ffe040"), Map.entry("white", "#ffffff"),
             Map.entry("weiß", "#ffffff"), Map.entry("pink", "#ff60c0"), Map.entry("cyan", "#40e0ff"), Map.entry("grey", "#808080"),
             Map.entry("gray", "#808080"), Map.entry("grau", "#808080"), Map.entry("black", "#101010"), Map.entry("schwarz", "#101010"));
+
+    /** Custom sounds from the sounds folder as "magicportals:<name>" (only on the resource-pack server). */
+    private List<String> customSoundNames() {
+        try { return pack.soundEvents().keySet().stream().map(n -> "magicportals:" + n).toList(); }
+        catch (IOException e) { return List.of(); }
+    }
+
+    /**
+     * A sound key for /mp edit sound.<slot>: "default", "none", "namespace:path", or a bare name – a file from
+     * the sounds folder becomes "magicportals:<name>", anything else "minecraft:<name>". Null if invalid.
+     */
+    private String soundKey(String value) {
+        if (List.of("default", "reset", "standard").contains(value)) return "default";
+        if (List.of("none", "off", "aus", "silent").contains(value)) return "none";
+        if (!value.matches("([a-z0-9_.-]+:)?[a-z0-9_./-]+")) return null;
+        if (value.contains(":")) return value;
+        return customSoundNames().contains("magicportals:" + value) ? "magicportals:" + value : "minecraft:" + value;
+    }
 
     /** A colour as "#rrggbb" from a name or hex code; "none" to remove; null if invalid. */
     private static String color(String value) {
@@ -622,6 +672,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             var c = getConfig();
             sender.sendMessage(text("edit.header", args[1]));
             for (String key : EDITABLE.keySet()) {
+                if (key.startsWith("sound.")) continue;   // shown below, only the ones that are set
                 Object value = switch (key) {
                     case "name" -> portal != null ? portal.name : c.getString(path + ".name", args[1]);
                     case "style" -> c.getString(path + ".style", "gate");
@@ -645,12 +696,28 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                 };
                 sender.sendMessage(Component.text("  " + key + ": ", NamedTextColor.GRAY).append(Component.text(String.valueOf(value))));
             }
+            for (String slot : Portal.SOUND_SLOTS) {
+                String s = c.getString(path + ".sounds." + slot);
+                if (s != null) sender.sendMessage(Component.text("  sound." + slot + ": ", NamedTextColor.GRAY).append(Component.text(s)));
+            }
             sender.sendMessage(text("edit.hint", args[1]));
             return;
         }
         String key = args[2].toLowerCase(Locale.ROOT), raw = String.join(" ", Arrays.copyOfRange(args, 3, args.length)), value = raw.toLowerCase(Locale.ROOT);
         if (key.equals("insideview") || key.equals("inside")) key = "inside-view";
         if (!EDITABLE.containsKey(key)) { sender.sendMessage(error("edit.unknown", key, String.join(", ", EDITABLE.keySet()))); return; }
+        if (key.startsWith("sound.")) {
+            // custom sound for one slot: a sound key, a file from the sounds folder, "none" (silent) or "default"
+            String sound = soundKey(value);
+            if (sound == null) { sender.sendMessage(error("edit.invalid", raw, key, "default, none, magicportals:<name>, minecraft:<sound>")); return; }
+            if (sound.equals("default")) getConfig().set(path + ".sounds." + key.substring(6), null);
+            else getConfig().set(path + ".sounds." + key.substring(6), sound);
+            saveConfig();
+            load();
+            sender.sendMessage(text("edit.done", args[1], key, sound));
+            if (sound.startsWith("magicportals:")) sender.sendMessage(text("edit.sound"));
+            return;
+        }
         Object stored;
         switch (key) {
             case "name" -> stored = raw;
@@ -694,7 +761,10 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                 options = portals.stream().map(p -> p.target).toList();
             else if (args.length == 3 && sub.equals("style")) options = Style.ids();
             else if (args.length == 3 && sub.equals("edit")) options = List.copyOf(EDITABLE.keySet());
-            else if (args.length == 4 && sub.equals("edit")) options = EDITABLE.getOrDefault(args[2].toLowerCase(Locale.ROOT), List.of());
+            else if (args.length == 4 && sub.equals("edit")) {
+                options = new ArrayList<>(EDITABLE.getOrDefault(args[2].toLowerCase(Locale.ROOT), List.of()));
+                if (args[2].toLowerCase(Locale.ROOT).startsWith("sound.")) options.addAll(customSoundNames());
+            }
         }
         return options.stream().filter(s -> s.startsWith(input)).toList();
     }
