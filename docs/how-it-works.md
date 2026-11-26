@@ -41,6 +41,7 @@ The entity-outline post effect runs whenever a glowing entity is on screen. Magi
 4. March the ray through the voxel grid (DDA) and shade the first hit: face texture, tint, face shading, sky and block light, water transparency, plants as two crossed planes. Rays that leave the grid continue over the far-terrain heightfield.
 5. Rift style: add the animated edge – a thin bright line, haze, lightning arcs that flicker at their own rates, sparkles and a dark torn hem. From behind, a rift shows a starry nebula.
 6. If the camera itself is inside the opening area behind the plane, the whole screen is rendered from the scene – you are "inside" the destination.
+7. The portal pass writes how far away each pixel's content is into the alpha channel. A second pass (`magicportals_blur`) blurs portal pixels by that amount with a disc of samples, only gathering other portal pixels – depth of field without touching the rest of the screen.
 
 A second small pass removes the marker pixels from the outline buffer so no glow outline appears at the screen edge.
 

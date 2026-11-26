@@ -42,7 +42,8 @@ public final class ResourcePack {
             "assets/minecraft/shaders/core/rendertype_outline.fsh",
             "assets/minecraft/shaders/include/magicportals_marker.glsl",
             "assets/minecraft/shaders/post/magicportals.fsh",
-            "assets/minecraft/shaders/post/magicportals_scrub.fsh");
+            "assets/minecraft/shaders/post/magicportals_scrub.fsh",
+            "assets/minecraft/shaders/post/magicportals_blur.fsh");
 
     private final JavaPlugin plugin;
     private HttpServer webServer;

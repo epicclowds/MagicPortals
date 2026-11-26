@@ -260,7 +260,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
     }
 
     /** Settings of the view through a portal (section "view"). */
-    static final List<String> VIEW_KEYS = List.of("time", "fog", "fog-color", "tint", "tint-strength", "weather");
+    static final List<String> VIEW_KEYS = List.of("time", "fog", "fog-color", "tint", "tint-strength", "weather", "blur");
 
     /** The view settings of a portal as text ("time=night;fog=1.5;…"), read by the scene baker. */
     private static String viewSettings(ConfigurationSection portal) {
@@ -636,6 +636,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         EDITABLE.put("tint", List.of("none", "blue", "red", "green", "purple", "orange", "yellow", "#ff6040"));
         EDITABLE.put("tint-strength", List.of("0.25", "0.5", "0.75", "1"));
         EDITABLE.put("weather", List.of("none", "rain", "snow", "ash", "embers"));
+        EDITABLE.put("blur", List.of("0", "0.5", "1", "1.5", "2"));
         // custom sounds per slot, see Portal.SOUND_SLOTS
         for (String slot : Portal.SOUND_SLOTS) EDITABLE.put("sound." + slot, List.of("default", "none"));
     }
@@ -703,6 +704,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                     case "tint" -> c.getString(path + ".view.tint", "none");
                     case "tint-strength" -> c.getDouble(path + ".view.tint-strength", 0.5);
                     case "weather" -> c.getString(path + ".view.weather", "none");
+                    case "blur" -> c.getDouble(path + ".view.blur", 1.0);
                     default -> "none".equalsIgnoreCase(c.getString(path + ".frame")) ? "none" : "wall";
                 };
                 sender.sendMessage(Component.text("  " + key + ": ", NamedTextColor.GRAY).append(Component.text(String.valueOf(value))));
@@ -735,10 +737,10 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             case "style" -> { Style s = Style.parse(value); stored = s == null ? null : s.id; }
             case "time", "weather" -> stored = EDITABLE.get(key).contains(value) ? value : null;
             case "fog-color", "tint" -> stored = color(value);
-            case "volume", "particles", "fog", "tint-strength" -> {
+            case "volume", "particles", "fog", "tint-strength", "blur" -> {
                 double v;
                 try { v = Double.parseDouble(value.replace(',', '.')); } catch (NumberFormatException e) { v = -1; }
-                double max = switch (key) { case "volume" -> 4; case "fog" -> 8; case "tint-strength" -> 1; default -> 5; };
+                double max = switch (key) { case "volume" -> 4; case "fog" -> 8; case "tint-strength" -> 1; case "blur" -> 2; default -> 5; };
                 stored = v >= 0 && v <= max ? v : null;
             }
             case "facing" -> stored = EDITABLE.get("facing").contains(value) ? value : null;

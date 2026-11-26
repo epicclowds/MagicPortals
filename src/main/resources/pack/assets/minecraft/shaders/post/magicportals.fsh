@@ -85,6 +85,7 @@ int VIEW_TIME = 0;                    // 0 day, 1 sunset, 2 night
 float VIEW_FOG = 1.0;                 // fog density, 0 = none
 bool VIEW_FOG_CUSTOM = false;
 bool CAVE = false;                    // world with a ceiling (nether): rock ceiling and haze instead of sky
+float VIEW_BLUR = 1.0;                // depth-of-field strength, 0 = everything sharp
 vec3 VIEW_FOG_COLOR = vec3(0.0);
 vec3 VIEW_TINT = vec3(1.0);
 float VIEW_TINT_STRENGTH = 0.0;
@@ -94,7 +95,8 @@ vec3 SKY_LIGHT_COLOR = vec3(1.0);
 vec3 SKY_HORIZON = DP_HORIZON, SKY_ZENITH = DP_ZENITH;
 
 void setView(int scene) {
-    vec4 a = DP_VIEW[scene * 3], b = DP_VIEW[scene * 3 + 1], c = DP_VIEW[scene * 3 + 2];
+    vec4 a = DP_VIEW[scene * 4], b = DP_VIEW[scene * 4 + 1], c = DP_VIEW[scene * 4 + 2], e = DP_VIEW[scene * 4 + 3];
+    VIEW_BLUR = e.x;
     VIEW_TIME = int(a.x + 0.5);
     VIEW_FOG = a.y;
     VIEW_WEATHER = int(a.z + 0.5);
@@ -426,9 +428,14 @@ vec3 weather(vec3 c, vec3 start, vec3 d, float time) {
     return c;
 }
 
+// Blur amount of the current pixel (0 = sharp), written to the alpha channel for magicportals_blur.
+float BLUR = 0.0;
+
 // The destination as seen through this portal: scene, weather, colour filter.
 vec3 viewMarch(vec3 start, vec3 d, int scene, float time) {
     vec3 c = march(start, d, scene);
+    // depth of field: things far away are drawn out of focus by the blur pass (magicportals_blur)
+    BLUR = clamp(VIEW_BLUR * smoothstep(14.0, 110.0, MARCH_T), 0.0, 1.0);
     c = weather(c, start, d, time);
     if (VIEW_WEATHER == 1) c *= 0.85;   // overcast
     if (VIEW_TINT_STRENGTH > 0.0) {
@@ -888,7 +895,7 @@ void main() {
         vec3 color = viewMarch(hit + d * 1e-3, d, scene, time);
         float edge = min(min(hit.x, OPENING_W - hit.x), min(hit.y, OPENING_H - hit.y));
         color += vec3(0.35, 0.85, 1.0) * exp(-edge * 22.0) * 0.55;
-        fragColor = vec4(color, 1.0);
+        fragColor = vec4(color, BLUR);
     } else if (eye.z > 0.0 && style == 1) {
         // rift seen from the front: destination world inside, glowing edge around it
         if (d.z >= -1e-4) return;
@@ -900,7 +907,7 @@ void main() {
         if (edgeDist > 1.2) return;
         vec3 color = edgeDist < 0.0 ? viewMarch(hit + d * 1e-3, d, scene, time) : base.rgb * riftHem(edgeDist, angle);
         if (edgeDist < 0.0) color *= mix(1.0, 0.55, exp(edgeDist * 9.0));          // darker rim inside
-        fragColor = vec4(color + riftGlow(hit.xy, edgeDist, angle, time), 1.0);
+        fragColor = vec4(color + riftGlow(hit.xy, edgeDist, angle, time), BLUR);
     } else if (eye.z > 0.0 && style >= 2) {
         // inferno, storm, void, frost seen from the front
         if (d.z >= -1e-4) return;
@@ -928,12 +935,12 @@ void main() {
             }
             color = styleInside(style, viewMarch(start + d * 1e-3, d, scene, time), hit.xy, e, time);
         } else color = styleOutside(style, hit.xy, e, angle, time, base.rgb);
-        fragColor = vec4(color + styleGlow(style, hit.xy, e, angle, time), 1.0);
+        fragColor = vec4(color + styleGlow(style, hit.xy, e, angle, time), BLUR);
     } else if (insideView && eye.z > -INSIDE_DEPTH && eye.z <= 0.0 && inOpening(eye.xy)) {
         // The camera flew through the opening: the whole screen shows the destination world in all
         // directions, without the portal, as if you had really walked through. In game there are
         // barriers there, so normal players never get here.
-        fragColor = vec4(viewMarch(eye, d, scene, time), 1.0);
+        fragColor = vec4(viewMarch(eye, d, scene, time), BLUR);
     } else if (eye.z <= 0.0 && style == 1) {
         // rift seen from behind: glowing edge around a dark starry nebula
         if (d.z <= 1e-4) return;

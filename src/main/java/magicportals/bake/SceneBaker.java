@@ -445,7 +445,7 @@ public final class SceneBaker {
 
     /**
      * View settings of the portal showing a scene ("time=night;fog=2;fog-color=#3050ff;tint=…;tint-strength=0.5;weather=snow")
-     * as 12 numbers: time, fog, weather, tint strength | tint rgb, custom fog | fog rgb, 0.
+     * as 16 numbers: time, fog, weather, tint strength | tint rgb, custom fog | fog rgb, cave | blur, 0, 0, 0.
      */
     static double[] viewParameters(String text) {
         var p = new HashMap<String, String>();
@@ -460,14 +460,15 @@ public final class SceneBaker {
         double strength = tint == null ? 0 : number(p.get("tint-strength"), .5, 0, 1);
         if (tint == null) tint = new double[]{1, 1, 1};
         return new double[]{time, fog, weather, strength, tint[0], tint[1], tint[2], fogColor == null ? 0 : 1,
-                fogColor == null ? 0 : fogColor[0], fogColor == null ? 0 : fogColor[1], fogColor == null ? 0 : fogColor[2], 0};
+                fogColor == null ? 0 : fogColor[0], fogColor == null ? 0 : fogColor[1], fogColor == null ? 0 : fogColor[2], 0,
+                number(p.get("blur"), 1, 0, 2), 0, 0, 0};
     }
 
     /** The view parameters of all scenes as GLSL vec4 list. */
     private static String viewArray(List<double[]> views) {
         var parts = new ArrayList<String>();
         for (double[] v : views)
-            for (int i = 0; i < 12; i += 4)
+            for (int i = 0; i < 16; i += 4)
                 parts.add(String.format(Locale.ROOT, "vec4(%.4f, %.4f, %.4f, %.4f)", v[i], v[i + 1], v[i + 2], v[i + 3]));
         return String.join(", ", parts);
     }
@@ -601,10 +602,10 @@ public final class SceneBaker {
                 #define DP_FAR_STEP %d.0
                 #define DP_HORIZON vec3(0.75, 0.85, 1.0)
                 #define DP_ZENITH vec3(0.47, 0.65, 1.0)
-                // per scene: (time, fog, weather, tint strength), (tint rgb, custom fog), (fog rgb, cave)
+                // per scene: (time, fog, weather, tint strength), (tint rgb, custom fog), (fog rgb, cave), (blur, 0, 0, 0)
                 const vec4 DP_VIEW[%d] = vec4[](%s);
                 #endif
-                """.formatted(W, H, D, DB, DT, HB, RX0, GY0, count, ATLAS_COLUMNS, FarTerrain.COLUMNS, FarTerrain.ROWS, FarTerrain.STEP, count * 3, viewArray(views)));
+                """.formatted(W, H, D, DB, DT, HB, RX0, GY0, count, ATLAS_COLUMNS, FarTerrain.COLUMNS, FarTerrain.ROWS, FarTerrain.STEP, count * 4, viewArray(views)));
 
         Path post = output.resolve("assets/minecraft/post_effect");
         Files.createDirectories(post);
@@ -618,7 +619,7 @@ public final class SceneBaker {
     private static String postEffect(int voxelWidth, int voxelHeight, int paletteHeight, int farHeight) {
         return """
                 {
-                    "targets": { "swap": {}, "mp_image": {}, "mp_clean": {} },
+                    "targets": { "swap": {}, "mp_image": {}, "mp_blur": {}, "mp_clean": {} },
                     "passes": [
                         {
                             "vertex_shader": "minecraft:core/screenquad",
@@ -639,8 +640,14 @@ public final class SceneBaker {
                         },
                         {
                             "vertex_shader": "minecraft:core/screenquad",
+                            "fragment_shader": "minecraft:post/magicportals_blur",
+                            "inputs": [ { "sampler_name": "In", "target": "mp_image" }, { "sampler_name": "Main", "target": "minecraft:main" } ],
+                            "output": "mp_blur"
+                        },
+                        {
+                            "vertex_shader": "minecraft:core/screenquad",
                             "fragment_shader": "minecraft:post/blit",
-                            "inputs": [ { "sampler_name": "In", "target": "mp_image" } ],
+                            "inputs": [ { "sampler_name": "In", "target": "mp_blur" } ],
                             "uniforms": { "BlitConfig": [ { "name": "ColorModulate", "type": "vec4", "value": [ 1.0, 1.0, 1.0, 1.0 ] } ] },
                             "output": "minecraft:main"
                         },

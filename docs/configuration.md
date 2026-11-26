@@ -170,6 +170,7 @@ portals:
       tint: "#ff4020"      # colour filter over the whole view; none = off
       tint-strength: 0.5   # 0 – 1
       weather: snow        # none, rain, snow, ash, embers
+      blur: 1              # depth of field: 0 = all sharp, 1 = default, 2 = strong
 ```
 
 | Key | Default | Effect |
@@ -179,6 +180,7 @@ portals:
 | `fog-color` | sky | Colour of the fog and the sky behind it – blue, red, green fog … |
 | `tint` / `tint-strength` | off / `0.5` | Colour filter over the view. |
 | `weather` | `none` | Animated particles in the destination with real depth: `rain`, `snow`, `ash` (grey flakes, Nether), `embers` (rising sparks). |
+| `blur` | `1` | Depth of field like a camera: nearby blocks stay sharp, everything further away gets increasingly out of focus. `0` turns it off, `2` doubles it. |
 
 ## `resource-pack`
 
