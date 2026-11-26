@@ -40,7 +40,7 @@
 
 ## Quick start
 
-1. Put `MagicPortals.jar` into the `plugins` folder of **every** server in the network and start them once.
+1. Download `MagicPortals-<version>.jar` from the [Releases](https://github.com/epicclowds/MagicPortals/releases), put it into the `plugins` folder of **every** server in the network and start them once.
 2. On every server, open `plugins/MagicPortals/config.yml` and set
    ```yaml
    server: lobby          # this server's name from velocity.toml
@@ -116,3 +116,7 @@ The plugin jar ends up in `build/libs/`. Java 25 is required (Gradle downloads a
 The `tools/` folder contains helpers for development: `ShaderPruefen` compiles the portal shaders offline with shaderc (same compiler as the client), `Vorschau` renders a baked scene on the CPU, `LogoRender` draws the logo.
 
 > Code comments are partly German – the project started on a German server.
+
+## License
+
+[MIT](LICENSE) © epicclowds. Minecraft textures used for the portal views are taken from the client jar on your own server at bake time and are not part of this repository.
