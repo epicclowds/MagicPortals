@@ -2,20 +2,21 @@
 #define MAGICPORTALS_MARKER_GLSL
 
 // Shared definitions between the marker (outline shader) and the post shader.
-// Marker glow colour: R=254, G=1+style (1 gate, 2 rift), B=160+scene (scene 0..15).
+// Marker glow colour: R=254, B=160+scene (scene 0..15),
+// G = 1 + style (0 gate, 1 rift) + 2*(no inside view) + 4*(width-1) + 32*(height-1), width/height 1..7.
 #define DP_PIXEL 32
 #define DP_MAGIC 1234.5
 
 int dp_marker_scene(vec4 color) {
     ivec3 c = ivec3(round(color.rgb * 255.0));
-    if (c.r == 254 && c.g >= 1 && c.g <= 2 && c.b >= 160 && c.b < 176) {
+    if (c.r == 254 && c.g >= 1 && c.g <= 224 && c.b >= 160 && c.b < 176) {
         return c.b - 160;
     }
     return -1;
 }
 
-int dp_marker_style(vec4 color) {
-    return int(round(color.g * 255.0)) - 1;
+int dp_marker_code(vec4 color) {
+    return int(round(color.g * 255.0));
 }
 
 vec4 dp_pack(float value) {

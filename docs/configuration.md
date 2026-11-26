@@ -78,15 +78,18 @@ One entry per portal on this server. The key is the **target server**.
 | `x`, `y`, `z` | auto | Position of the portal (see below). If missing, MagicPortals places the portal on flat ground near the world spawn and writes the coordinates back. |
 | `frame.outer` | `STONE_BRICKS` | Outer wall blocks (style `gate`). Any block material. |
 | `frame.inner` | `POLISHED_BLACKSTONE_BRICKS` | Ring around the opening (style `gate`). |
+| `frame` | – | Set to `none` for no wall at all (you build the frame yourself). The Portal Wand sets this automatically. |
+| `width`, `height` | `3`, `3` | Size of the opening in blocks (1–7). For rifts it scales the crack and the walk-through area. |
+| `inside-view` | `false` | `true`: cameras (spectators, freecam, replays) that fly through the opening see the destination all around; invisible barriers behind the opening keep normal players out. `false`: the portal is flat from behind and nothing is placed behind it. |
 
 **Position and orientation.** Portals always face **south**: players approach from the south and walk north through the opening.
 `x y z` is the bottom centre block of the 3×3 opening; `y` is the block players stand in (one above the floor). The plane of the portal is the north face of row `z`. The easiest way to get it right is `/mp set <target>` while looking north – it places the portal 3 blocks in front of you.
 
 What gets built:
 
-- **gate:** a 7×5 wall of block displays with a 3×3 opening (amethyst rim, glowing glass edge). Invisible barriers in the wall stop players from walking through it.
+- **gate:** a wall of block displays reaching 2 blocks around the opening (amethyst rim, glowing glass edge). Invisible barriers in the wall stop players from walking through it. With `frame: none` nothing is built.
 - **rift:** no wall. A few invisible light blocks make the surroundings glow.
-- **both:** invisible barriers in the 3×3×3 space right behind the opening (that is where the "inside the destination" view starts), a hidden marker entity for the shader and a floating label. Everything is removed again when the plugin stops; the world itself is not changed otherwise.
+- **both:** a hidden marker entity for the shader and a floating label; with `inside-view: true` also invisible barriers in the 3 blocks right behind the opening. Everything is removed again when the plugin stops; the world itself is not changed otherwise.
 
 **Counterparts.** A portal from A to B shows what is in front of the portal from B to A, and players arriving from A spawn in front of that portal. So every portal needs a counterpart on its target server.
 

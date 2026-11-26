@@ -20,7 +20,8 @@
 - **See where you are going.** The opening shows the real destination – blocks, textures, light, water, plants, fog – in true 3D with parallax as you move. No fake blocks, no server load: a post-processing shader draws it on the client.
 - **Walk through to switch servers.** Players step into the portal and Velocity moves them to the target server, where they arrive right in front of the portal leading back.
 - **Two styles.** `gate` – an opening in a thick stone wall with an amethyst rim. `rift` – a floating, jagged dimensional crack with flickering cyan / magenta / gold edges, lightning arcs, sparkles, particles and a humming sound. Seen from behind, a rift shows a starry nebula.
-- **Fly inside.** Spectators and replay/freecam cameras that pass through the opening end up *inside* the destination and can look around in every direction.
+- **Any size, your own frame.** Mark the opening with the Portal Wand (`/mp wand`) – up to 7×7 blocks – and build your own frame around it. Rifts scale with the portal size.
+- **Fly inside (optional).** With `inside-view: true`, spectators and replay/freecam cameras that pass through the opening end up *inside* the destination and can look around in every direction.
 - **Works with your resource-pack setup.** Delivered through **Oraxen**, **ItemsAdder** or a **built-in web server** (no extra plugin needed). Ultimate UI is detected automatically.
 - **Any number of servers.** Each server lists its portals in its config; up to 16 portal views per network.
 - **Network-ready.** Servers share data through **MySQL / MariaDB** (multiple machines, cloud setups) or a shared folder.
@@ -85,6 +86,16 @@ A portal always comes in **pairs**: lobby → survival *and* survival → lobby.
 
 Run `/mp update` again whenever you add, move or remove portals, or after big builds around a portal: the view through a portal is a snapshot, refreshed by every update.
 
+### Your own frame, any size – the Portal Wand
+
+1. Build your frame with an empty opening that faces **south** (players walk north into it). Any rectangle up to 7×7 blocks.
+2. `/mp wand` gives you the Portal Wand (a glowing golden pickaxe).
+3. **Left-click** the block in one corner of the opening, **right-click** the opposite corner. A particle outline shows the marked area.
+4. `/mp set survival Survival` – the portal fills exactly that opening. No wall and no barriers are placed (`frame: none`), your build stays as it is.
+5. `/mp update` on the resource-pack server.
+
+The two portals of a pair should have the same width, so the views line up. Rifts work the same way: `width`/`height` scale the crack and the area you can walk through.
+
 ## Commands
 
 All commands need `magicportals.admin` (default: op). Aliases: `/mp`, `/magicportal`.
@@ -92,7 +103,8 @@ All commands need `magicportals.admin` (default: op). Aliases: `/mp`, `/magicpor
 | Command | What it does |
 |---|---|
 | `/mp list` | Portals on this server: target, position, style, online state, scene number |
-| `/mp set <server> [name]` | Create or move the portal to `<server>` 3 blocks north of you |
+| `/mp wand` | Get the Portal Wand to mark an opening of any size (left-click / right-click the two corners) |
+| `/mp set <server> [name]` | Create or move the portal to `<server>`: into the opening marked with the wand, otherwise 3 blocks north of you |
 | `/mp remove <server>` | Delete the portal to `<server>` |
 | `/mp style <server> <gate\|rift>` | Change the look of a portal |
 | `/mp update` | Bake all portal views and deliver the resource pack (pack server only) |

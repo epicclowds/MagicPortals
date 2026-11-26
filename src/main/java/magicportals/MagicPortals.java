@@ -193,10 +193,12 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             }
             String name = p.getString("name", target.substring(0, 1).toUpperCase(Locale.ROOT) + target.substring(1));
             String style = p.getString("style", "gate").toLowerCase(Locale.ROOT);
+            boolean noFrame = "none".equalsIgnoreCase(p.getString("frame"));
             portals.add(new Portal(this, world, target, name, pos[0], pos[1], pos[2],
-                    material(p.getString("frame.outer"), Material.STONE_BRICKS),
-                    material(p.getString("frame.inner"), Material.POLISHED_BLACKSTONE_BRICKS),
-                    style.equals("rift"), messages.get("offline.sign")));
+                    p.getInt("width", 3), p.getInt("height", 3),
+                    noFrame ? null : material(p.getString("frame.outer"), Material.STONE_BRICKS),
+                    noFrame ? null : material(p.getString("frame.inner"), Material.POLISHED_BLACKSTONE_BRICKS),
+                    style.equals("rift"), p.getBoolean("inside-view", false), messages.get("offline.sign")));
         }
         scenesVersion = -1;
         for (Portal p : portals) {
@@ -353,6 +355,62 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         if (e.getTo().getWorld() != world) for (Portal p : portals) p.reset(e.getPlayer());
     }
 
+    // ---------- portal wand ----------
+
+    private final Map<UUID, Location[]> selections = new HashMap<>();
+    private NamespacedKey wandKey() { return new NamespacedKey(this, "wand"); }
+
+    /** The selection tool: a glowing golden pickaxe tagged with magicportals:wand. */
+    private org.bukkit.inventory.ItemStack wand() {
+        var item = new org.bukkit.inventory.ItemStack(Material.GOLDEN_PICKAXE);
+        item.editMeta(meta -> {
+            meta.displayName(Component.text("Portal Wand", NamedTextColor.LIGHT_PURPLE).decoration(net.kyori.adventure.text.format.TextDecoration.ITALIC, false));
+            meta.lore(List.of(Component.text(messages.get("wand.lore1"), NamedTextColor.GRAY), Component.text(messages.get("wand.lore2"), NamedTextColor.GRAY)));
+            meta.setEnchantmentGlintOverride(true);
+            meta.setUnbreakable(true);
+            meta.getPersistentDataContainer().set(wandKey(), org.bukkit.persistence.PersistentDataType.BYTE, (byte) 1);
+        });
+        return item;
+    }
+
+    private boolean isWand(org.bukkit.inventory.ItemStack item) {
+        return item != null && item.hasItemMeta() && item.getItemMeta().getPersistentDataContainer().has(wandKey());
+    }
+
+    @EventHandler public void onWandClick(PlayerInteractEvent e) {
+        if (!isWand(e.getItem()) || e.getClickedBlock() == null || e.getHand() != org.bukkit.inventory.EquipmentSlot.HAND) return;
+        if (!e.getPlayer().hasPermission("magicportals.admin")) return;
+        boolean left = e.getAction() == org.bukkit.event.block.Action.LEFT_CLICK_BLOCK;
+        if (!left && e.getAction() != org.bukkit.event.block.Action.RIGHT_CLICK_BLOCK) return;
+        e.setCancelled(true);
+        Location block = e.getClickedBlock().getLocation();
+        Location[] sel = selections.computeIfAbsent(e.getPlayer().getUniqueId(), k -> new Location[2]);
+        sel[left ? 0 : 1] = block;
+        e.getPlayer().sendMessage(text(left ? "wand.pos1" : "wand.pos2", block.getBlockX(), block.getBlockY(), block.getBlockZ()));
+        if (sel[0] != null && sel[1] != null) showSelection(e.getPlayer(), sel[0], sel[1]);
+    }
+
+    @EventHandler(ignoreCancelled = true) public void onWandBreak(org.bukkit.event.block.BlockBreakEvent e) {
+        if (isWand(e.getPlayer().getInventory().getItemInMainHand())) e.setCancelled(true);
+    }
+
+    /** Outlines the marked opening with particles for a few seconds and reports its size. */
+    private void showSelection(Player player, Location a, Location b) {
+        int minX = Math.min(a.getBlockX(), b.getBlockX()), maxX = Math.max(a.getBlockX(), b.getBlockX()) + 1;
+        int minY = Math.min(a.getBlockY(), b.getBlockY()), maxY = Math.max(a.getBlockY(), b.getBlockY()) + 1;
+        double z = a.getBlockZ();
+        if (a.getBlockZ() != b.getBlockZ()) { player.sendMessage(error("wand.flat")); return; }
+        player.sendMessage(text("wand.ready", maxX - minX, maxY - minY));
+        var dust = new Particle.DustOptions(Color.fromRGB(255, 77, 242), 1f);
+        for (int t = 0; t < 6; t++) Bukkit.getScheduler().runTaskLater(this, () -> {
+            for (double s = 0; s <= 1.001; s += .05) {
+                double px = minX + (maxX - minX) * s, py = minY + (maxY - minY) * s;
+                for (double[] p : new double[][]{{px, minY}, {px, maxY}, {minX, py}, {maxX, py}})
+                    player.spawnParticle(Particle.DUST, p[0], p[1], z, 1, 0, 0, 0, 0, dust);
+            }
+        }, t * 10L);
+    }
+
     // ---------- commands ----------
 
     private Component text(String key, Object... values) { return Component.text(messages.get(key, values)); }
@@ -386,17 +444,40 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                 if (args.length < 2) { sender.sendMessage(error("set.usage")); return true; }
                 String target = args[1];
                 if (target.equals(server) || !target.matches("[A-Za-z0-9_-]+")) { sender.sendMessage(error("set.invalid", target)); return true; }
-                Location l = player.getLocation();
                 String path = "portals." + target;
-                getConfig().set(path + ".x", l.getBlockX());
-                getConfig().set(path + ".y", l.getBlockY());
-                getConfig().set(path + ".z", l.getBlockZ() - 3);
+                Location[] sel = selections.get(player.getUniqueId());
+                if (sel != null && sel[0] != null && sel[1] != null) {
+                    // opening marked with the wand: exactly these blocks, no frame (built by hand)
+                    Location a = sel[0], b = sel[1];
+                    if (a.getWorld() != world || b.getWorld() != world || a.getBlockZ() != b.getBlockZ()) { sender.sendMessage(error("wand.flat")); return true; }
+                    int minX = Math.min(a.getBlockX(), b.getBlockX()), minY = Math.min(a.getBlockY(), b.getBlockY());
+                    int w = Math.abs(a.getBlockX() - b.getBlockX()) + 1, h = Math.abs(a.getBlockY() - b.getBlockY()) + 1;
+                    if (w > Portal.MAX_SIZE || h > Portal.MAX_SIZE) { sender.sendMessage(error("wand.size", Portal.MAX_SIZE)); return true; }
+                    getConfig().set(path + ".x", minX + (w - 1) / 2);
+                    getConfig().set(path + ".y", minY);
+                    getConfig().set(path + ".z", a.getBlockZ());
+                    getConfig().set(path + ".width", w);
+                    getConfig().set(path + ".height", h);
+                    getConfig().set(path + ".frame", "none");
+                    selections.remove(player.getUniqueId());
+                    sender.sendMessage(text("set.selection", target, w, h));
+                } else {
+                    Location l = player.getLocation();
+                    getConfig().set(path + ".x", l.getBlockX());
+                    getConfig().set(path + ".y", l.getBlockY());
+                    getConfig().set(path + ".z", l.getBlockZ() - 3);
+                    sender.sendMessage(text("set.done", target));
+                }
                 if (!getConfig().contains(path + ".style")) getConfig().set(path + ".style", "gate");
                 if (args.length >= 3) getConfig().set(path + ".name", String.join(" ", Arrays.copyOfRange(args, 2, args.length)));
                 saveConfig();
                 load();
-                sender.sendMessage(text("set.done", target));
                 sender.sendMessage(text("set.counterpart", target, server));
+            }
+            case "wand" -> {
+                if (!(sender instanceof Player player)) { sender.sendMessage(error("only.ingame")); return true; }
+                player.getInventory().addItem(wand());
+                sender.sendMessage(text("wand.given"));
             }
             case "remove" -> {
                 if (args.length < 2 || !getConfig().contains("portals." + args[1])) { sender.sendMessage(error("remove.unknown")); return true; }
@@ -418,14 +499,14 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             case "reload" -> { load(); pack.startWebServer(); sender.sendMessage(text("reload.done", portals.size())); }
             case "update" -> update(sender);
             default -> {
-                for (String help : List.of("help.list", "help.set", "help.remove", "help.style", "help.update", "help.reload")) sender.sendMessage(text(help));
+                for (String help : List.of("help.list", "help.wand", "help.set", "help.remove", "help.style", "help.update", "help.reload")) sender.sendMessage(text(help));
             }
         }
         return true;
     }
 
     @Override public List<String> onTabComplete(CommandSender sender, Command cmd, String label, String[] args) {
-        if (args.length == 1) return List.of("list", "set", "remove", "style", "update", "reload").stream().filter(s -> s.startsWith(args[0].toLowerCase(Locale.ROOT))).toList();
+        if (args.length == 1) return List.of("list", "wand", "set", "remove", "style", "update", "reload").stream().filter(s -> s.startsWith(args[0].toLowerCase(Locale.ROOT))).toList();
         String sub = subCommand(args[0]);
         if (args.length == 2 && (sub.equals("remove") || sub.equals("style"))) return portals.stream().map(p -> p.target).toList();
         if (args.length == 3 && sub.equals("style")) return List.of("gate", "rift");

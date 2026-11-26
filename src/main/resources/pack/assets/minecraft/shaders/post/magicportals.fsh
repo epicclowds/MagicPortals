@@ -20,7 +20,9 @@ uniform sampler2D AtlasSampler;
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
 
-const float OPENING = 3.0;
+// Opening size and options of the portal being drawn, decoded from the marker in main().
+float OPENING_W = 3.0, OPENING_H = 3.0;
+int gridX0 = DP_RX0 + 1;
 const float INSIDE_DEPTH = 3.0;   // camera counts as "inside" up to this depth behind the opening
 
 float readData(int i) {
@@ -32,7 +34,7 @@ int byte8(float v) { return int(round(v * 255.0)); }
 // ---------- scene data ----------
 
 ivec4 voxel(ivec3 cell, int scene) {
-    int i = cell.x - DP_GX0;
+    int i = cell.x - gridX0;
     int j = cell.y - DP_GY0;
     int k = -cell.z - 1 + DP_DB;   // rows 0..DF-1 lie in front of the plane (the area behind the destination portal)
     if (i < 0 || j < 0 || k < 0 || i >= DP_W || j >= DP_H || k >= DP_DT) return ivec4(-1);
@@ -89,7 +91,7 @@ float fog(float dist, vec3 d) {
 }
 
 bool inOpening(vec2 p) {
-    return p.x >= 0.0 && p.x <= OPENING && p.y >= 0.0 && p.y <= OPENING;
+    return p.x >= 0.0 && p.x <= OPENING_W && p.y >= 0.0 && p.y <= OPENING_H;
 }
 
 // Ray vs. box inside one cell. Returns t and face, t < 0 if missed.
@@ -207,17 +209,18 @@ float noise2(vec2 p) {
     return mix(mix(hash2(i), hash2(i + vec2(1, 0)), f.x), mix(hash2(i + vec2(0, 1)), hash2(i + vec2(1, 1)), f.x), f.y);
 }
 
-const vec2 RIFT_CENTER = vec2(1.5, 2.05);
+vec2 RIFT_CENTER = vec2(1.5, 2.05);
 const float RIFT_BOTTOM = -0.25;    // lower tip (just below the floor)
-const float RIFT_HEIGHT = 4.6;      // up to the upper tip
-const float RIFT_HALF_WIDTH = 0.8;     // half width at the widest point
+float RIFT_HEIGHT = 4.6;            // up to the upper tip
+float RIFT_HALF_WIDTH = 0.8;        // half width at the widest point
 
 // noise with hard kinks (linear instead of smooth interpolation)
 float kinkNoise(float x) { float i = floor(x); return mix(hash1(i), hash1(i + 1.0), fract(x)); }
 
 // centre line of the rift: zig-zag like a lightning crack
 float riftCenterLine(float t) {
-    return 1.5 + 0.5 * (kinkNoise(t * 4.0 + 2.0) - 0.5) + 0.12 * (kinkNoise(t * 11.0 + 5.0) - 0.5);
+    float scale = RIFT_HALF_WIDTH / 0.8;
+    return RIFT_CENTER.x + scale * (0.5 * (kinkNoise(t * 4.0 + 2.0) - 0.5) + 0.12 * (kinkNoise(t * 11.0 + 5.0) - 0.5));
 }
 
 // Distance to the rift edge in blocks (negative = inside). Base shape is a tall, narrow slit,
@@ -310,7 +313,16 @@ void main() {
     mat3 rotation = mat3(vec3(readData(16), readData(17), readData(18)), vec3(readData(20), readData(21), readData(22)), vec3(readData(24), readData(25), readData(26)));
     vec3 camera = vec3(readData(19), readData(23), readData(27));   // origin of view space, local
     int scene = int(readData(28) + 0.5);
-    int style = int(readData(30) + 0.5);                 // 0 = gate in a wall, 1 = rift
+    // marker code = 1 + style + 2*(no inside view) + 4*(width-1) + 32*(height-1)
+    int code = int(readData(30) + 0.5) - 1;
+    int style = code & 1;                               // 0 = gate, 1 = rift
+    bool insideView = ((code >> 1) & 1) == 0;
+    OPENING_W = float(((code >> 2) & 7) + 1);
+    OPENING_H = float(((code >> 5) & 7) + 1);
+    gridX0 = DP_RX0 + (int(OPENING_W) - 1) / 2;
+    RIFT_CENTER = vec2(OPENING_W * 0.5, OPENING_H * 0.683);
+    RIFT_HEIGHT = OPENING_H * 1.533;
+    RIFT_HALF_WIDTH = 0.8 * OPENING_W / 3.0;
     float time = readData(31) * 1200.0;                 // seconds within one game day
     if (scene < 0 || scene >= DP_SCENES) return;
 
@@ -342,7 +354,7 @@ void main() {
         if (!inOpening(hit.xy)) return;
         if (sceneDist < tPlane - 0.03) return;
         vec3 color = march(hit + d * 1e-3, d, scene);
-        float edge = min(min(hit.x, OPENING - hit.x), min(hit.y, OPENING - hit.y));
+        float edge = min(min(hit.x, OPENING_W - hit.x), min(hit.y, OPENING_H - hit.y));
         color += vec3(0.35, 0.85, 1.0) * exp(-edge * 22.0) * 0.55;
         fragColor = vec4(color, 1.0);
     } else if (eye.z > 0.0 && style == 1) {
@@ -357,7 +369,7 @@ void main() {
         vec3 color = edgeDist < 0.0 ? march(hit + d * 1e-3, d, scene) : base.rgb * riftHem(edgeDist, angle);
         if (edgeDist < 0.0) color *= mix(1.0, 0.55, exp(edgeDist * 9.0));          // darker rim inside
         fragColor = vec4(color + riftGlow(hit.xy, edgeDist, angle, time), 1.0);
-    } else if (eye.z > -INSIDE_DEPTH && eye.z <= 0.0 && inOpening(eye.xy)) {
+    } else if (insideView && eye.z > -INSIDE_DEPTH && eye.z <= 0.0 && inOpening(eye.xy)) {
         // The camera flew through the opening: the whole screen shows the destination world in all
         // directions, without the portal, as if you had really walked through. In game there are
         // barriers there, so normal players never get here.

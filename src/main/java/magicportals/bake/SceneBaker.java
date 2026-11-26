@@ -450,14 +450,14 @@ public final class SceneBaker {
                 #define DP_DB %d
                 #define DP_DT %d
                 #define DP_HB %d
-                #define DP_GX0 %d
+                #define DP_RX0 %d
                 #define DP_GY0 %d
                 #define DP_SCENES %d
                 #define DP_ATLAS_COLUMNS %d
                 #define DP_HORIZON vec3(0.75, 0.85, 1.0)
                 #define DP_ZENITH vec3(0.47, 0.65, 1.0)
                 #endif
-                """.formatted(W, H, D, DB, DT, HB, GX0, GY0, count, ATLAS_COLUMNS));
+                """.formatted(W, H, D, DB, DT, HB, RX0, GY0, count, ATLAS_COLUMNS));
 
         Path post = output.resolve("assets/minecraft/post_effect");
         Files.createDirectories(post);

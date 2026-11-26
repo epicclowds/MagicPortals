@@ -17,17 +17,21 @@ import org.joml.Vector3f;
 
 /**
  * A portal on this server that leads to another server of the network.
- * Layout: the 3x3 opening lies in block row z, from x-1 to x+1 and y to y+2. Players stand south of it
- * (larger z) and look north through it. The portal plane is the north face of row z.
+ * Layout: the opening (width x height blocks) lies in block row z, from column x0 = x - (width-1)/2 to
+ * x0 + width - 1 and from y to y + height - 1; x is the centre column (left of centre for even widths).
+ * Players stand south of it (larger z) and look north through it. The portal plane is the north face of row z.
  */
 public final class Portal {
+    public static final int MAX_SIZE = 7;
     public final String target, name;
-    public final int x, y, z;
-    public final boolean rift;   // style "rift": floating dimensional crack instead of a gate in a wall
+    public final int x, y, z, width, height;
+    public final boolean rift;         // style "rift": floating dimensional crack instead of a gate
+    public final boolean insideView;   // cameras can fly "into" the destination behind the opening
+    private final int x0;              // west-most column of the opening
 
     private final Plugin plugin;
     private final World world;
-    private final Material outer, inner;
+    private final Material outer, inner;   // null = no frame (the portal sits in a frame built by hand)
     private final String offlineLabel;
 
     private final List<Entity> decoration = new ArrayList<>();
@@ -54,12 +58,22 @@ public final class Portal {
     /** A finished capture of this portal, stored by the plugin off the main thread. */
     public record Capture(String key, Snapshot front, Snapshot back) { }
 
-    public Portal(Plugin plugin, World world, String target, String name, int x, int y, int z,
-                  Material outer, Material inner, boolean rift, String offlineLabel) {
+    public Portal(Plugin plugin, World world, String target, String name, int x, int y, int z, int width, int height,
+                  Material outer, Material inner, boolean rift, boolean insideView, String offlineLabel) {
         this.plugin = plugin; this.world = world; this.target = target; this.name = name;
         this.x = x; this.y = y; this.z = z; this.outer = outer; this.inner = inner; this.rift = rift;
+        this.width = Math.max(1, Math.min(MAX_SIZE, width));
+        this.height = Math.max(1, Math.min(MAX_SIZE, height));
+        this.x0 = x - (this.width - 1) / 2;
+        this.insideView = insideView;
         this.offlineLabel = offlineLabel;
     }
+
+    /** Column the destination's view is mirrored around (the other side's portal centre). */
+    private int mirrorX() { return x + (width - 1) % 2; }
+
+    /** Marker glow green channel: 1 + style + 2*(no inside view) + 4*(width-1) + 32*(height-1). */
+    private int markerCode() { return 1 + (rift ? 1 : 0) + (insideView ? 0 : 2) + 4 * (width - 1) + 32 * (height - 1); }
 
     /** Exchange key: "<server>@<target>" = the view in front of the portal from server to target. */
     public static String key(String server, String target) { return server + "@" + target; }
@@ -97,21 +111,22 @@ public final class Portal {
 
     public void build() {
         world.getChunkAt(x >> 4, z >> 4).addPluginChunkTicket(plugin);
-        // Right behind the opening (3x3x3) the shader shows the in-between view; normal players cannot get there.
-        for (int cx = x - 1; cx <= x + 1; cx++) for (int cy = y; cy <= y + 2; cy++) for (int cz = z - 3; cz <= z - 1; cz++) barrier(cx, cy, cz);
-        if (rift) buildRift(); else buildWall();
+        // With the in-between view, the shader shows the destination all around a camera right behind the
+        // opening (3 blocks deep); barriers keep normal players out of there.
+        if (insideView) for (int cx = x0; cx < x0 + width; cx++) for (int cy = y; cy < y + height; cy++) for (int cz = z - 3; cz <= z - 1; cz++) barrier(cx, cy, cz);
+        if (rift) buildRift(); else if (outer != null) buildWall();
         // Marker for the portal shader at the lower west corner of the opening on the portal plane.
-        // Its glow colour carries style and scene number (R=254, G=1+style, B=160+scene).
-        marker = world.spawn(at(x - 1, y, z), BlockDisplay.class, d -> {
+        // Its glow colour carries scene, style, options and size (R=254, G=markerCode, B=160+scene).
+        marker = world.spawn(at(x0, y, z), BlockDisplay.class, d -> {
             d.setPersistent(false);
             d.setBlock(Material.WHITE_CONCRETE.createBlockData());
             d.setTransformation(new Transformation(new Vector3f(), new Quaternionf(), new Vector3f(.001f, .001f, .001f), new Quaternionf()));
-            d.setDisplayWidth(10f); d.setDisplayHeight(7f); d.setViewRange(2f);
+            d.setDisplayWidth(2f * width + 6f); d.setDisplayHeight(2f * height + 4f); d.setViewRange(2f);
         });
         decoration.add(marker);
         setScene(scene);
-        double labelHeight = rift ? 5.0 : 5.5, labelZ = rift ? .5 : 1.2;
-        label = world.spawn(at(x + .5, y + labelHeight, z + labelZ), TextDisplay.class, d -> {
+        double labelHeight = rift ? height * 1.53 + .5 : height + (outer != null ? 2.5 : 1.0), labelZ = rift || outer == null ? .5 : 1.2;
+        label = world.spawn(at(x0 + width / 2.0, y + labelHeight, z + labelZ), TextDisplay.class, d -> {
             d.setPersistent(false); d.setBillboard(Display.Billboard.CENTER); d.setShadowed(true);
         });
         decoration.add(label);
@@ -121,22 +136,23 @@ public final class Portal {
     /** Rift: no wall, only invisible light so the surroundings look lit by the rift. */
     private void buildRift() {
         helperBlock(x, y + 1, z + 1, Material.LIGHT, 12);
-        helperBlock(x, y + 3, z + 1, Material.LIGHT, 9);
+        helperBlock(x, y + height, z + 1, Material.LIGHT, 9);
     }
 
-    /** Thick wall (7 wide, 5 high, 1 deep) of block displays with the 3x3 opening, barriers inside the wall. */
+    /** Thick wall of block displays (2 blocks around the opening, 1 deep), barriers inside the wall. */
     private void buildWall() {
-        for (int cx = x - 3; cx <= x + 3; cx++) for (int cy = y; cy <= y + 4; cy++) {
-            if (cx >= x - 1 && cx <= x + 1 && cy <= y + 2) continue;
-            boolean rim = cx >= x - 2 && cx <= x + 2 && cy <= y + 3;
+        float w = width, h = height;
+        for (int cx = x0 - 2; cx <= x0 + width + 1; cx++) for (int cy = y; cy <= y + height + 1; cy++) {
+            if (cx >= x0 && cx < x0 + width && cy < y + height) continue;
+            boolean rim = cx >= x0 - 1 && cx <= x0 + width && cy <= y + height;
             block(cx, cy, z, 1f, 1f, 1f, rim ? inner : outer, false);
             barrier(cx, cy, z);
         }
-        for (double px : new double[]{x - 1.0, x + 1.94}) block(px, y, z + .02, .06f, 3f, .96f, Material.AMETHYST_BLOCK, true);
-        block(x - 1.0, y + 2.94, z + .02, 3f, .06f, .96f, Material.AMETHYST_BLOCK, true);
-        for (double px : new double[]{x - 1.0, x + 1.95}) block(px, y, z - .01, .05f, 3f, .05f, Material.LIGHT_BLUE_STAINED_GLASS, true);
-        block(x - 1.0, y + 2.95, z - .01, 3f, .05f, .05f, Material.LIGHT_BLUE_STAINED_GLASS, true);
-        block(x - 1.0, y, z - .01, 3f, .03f, .05f, Material.LIGHT_BLUE_STAINED_GLASS, true);
+        for (double px : new double[]{x0, x0 + w - .06}) block(px, y, z + .02, .06f, h, .96f, Material.AMETHYST_BLOCK, true);
+        block(x0, y + h - .06, z + .02, w, .06f, .96f, Material.AMETHYST_BLOCK, true);
+        for (double px : new double[]{x0, x0 + w - .05}) block(px, y, z - .01, .05f, h, .05f, Material.LIGHT_BLUE_STAINED_GLASS, true);
+        block(x0, y + h - .05, z - .01, w, .05f, .05f, Material.LIGHT_BLUE_STAINED_GLASS, true);
+        block(x0, y, z - .01, w, .03f, .05f, Material.LIGHT_BLUE_STAINED_GLASS, true);
     }
 
     public void tearDown() {
@@ -157,7 +173,7 @@ public final class Portal {
         if (marker == null) return;
         if (newScene == null || newScene < 0 || newScene >= 16) { marker.setGlowing(false); return; }
         marker.setGlowing(true);
-        marker.setGlowColorOverride(Color.fromRGB(254, rift ? 2 : 1, 160 + newScene));
+        marker.setGlowColorOverride(Color.fromRGB(254, markerCode(), 160 + newScene));
     }
 
     private void updateLabel() {
@@ -180,9 +196,9 @@ public final class Portal {
     public Capture captureAll(String server) {
         var front = new Snapshot(); var newBehind = new Snapshot(); var back = new Snapshot(Snapshot.BACK_DEPTH);
         for (int d = 0; d < Snapshot.DEPTH; d++) {
-            front.captureFront(world, x, y, z, d);
+            front.captureFront(world, mirrorX(), y, z, d);
             newBehind.captureBehind(world, x, y, z, d);
-            if (d < Snapshot.BACK_DEPTH) back.captureBack(world, x, y, z, d);
+            if (d < Snapshot.BACK_DEPTH) back.captureBack(world, mirrorX(), y, z, d);
         }
         behind = newBehind;
         compare();
@@ -199,9 +215,9 @@ public final class Portal {
     public Capture captureStep(String server) {
         if (captureFront == null) return null;
         for (int n = 0; n < 2 && slice < Snapshot.DEPTH; n++, slice++) {
-            captureFront.captureFront(world, x, y, z, slice);
+            captureFront.captureFront(world, mirrorX(), y, z, slice);
             captureBehind.captureBehind(world, x, y, z, slice);
-            if (slice < Snapshot.BACK_DEPTH) captureBack.captureBack(world, x, y, z, slice);
+            if (slice < Snapshot.BACK_DEPTH) captureBack.captureBack(world, mirrorX(), y, z, slice);
         }
         if (slice < Snapshot.DEPTH) return null;
         var done = new Capture(key(server, target), captureFront, captureBack);
@@ -231,7 +247,7 @@ public final class Portal {
 
     private boolean inFront(Location eye) {
         return eye.getWorld() == world && eye.getZ() > z + .03 && eye.getZ() < z + 40
-                && Math.abs(eye.getX() - (x + .5)) < 40 && Math.abs(eye.getY() - (y + 1.5)) < 30;
+                && Math.abs(eye.getX() - (x0 + width / 2.0)) < 40 && Math.abs(eye.getY() - (y + 1.5)) < 30;
     }
 
     public void updateFallback(Player p, int tick) {
@@ -265,21 +281,21 @@ public final class Portal {
     private BitSet visibleCells(double ex, double ey, double ez) {
         var bits = new BitSet(Snapshot.SIZE);
         boolean inTunnel = ez <= z + 1;
-        if (inTunnel && (ex <= x - 1 || ex >= x + 2 || ey <= y || ey >= y + 3)) return bits;
+        if (inTunnel && (ex <= x0 || ex >= x0 + width || ey <= y || ey >= y + height)) return bits;
         double toBack = Math.max(.03, ez - z), toFront = ez - (z + 1);
         for (int d = 0; d < Snapshot.DEPTH; d++) {
             double near = ez - (z - d), far = ez - (z - d - 1);
             double s1 = near / toBack, s2 = far / toBack;
-            double xa = Math.min(ex + (x - 1 - ex) * s1, ex + (x - 1 - ex) * s2);
-            double xb = Math.max(ex + (x + 2 - ex) * s1, ex + (x + 2 - ex) * s2);
+            double xa = Math.min(ex + (x0 - ex) * s1, ex + (x0 - ex) * s2);
+            double xb = Math.max(ex + (x0 + width - ex) * s1, ex + (x0 + width - ex) * s2);
             double ya = Math.min(ey + (y - ey) * s1, ey + (y - ey) * s2);
-            double yb = Math.max(ey + (y + 3 - ey) * s1, ey + (y + 3 - ey) * s2);
+            double yb = Math.max(ey + (y + height - ey) * s1, ey + (y + height - ey) * s2);
             if (!inTunnel) {
                 double t1 = near / toFront, t2 = far / toFront;
-                xa = Math.max(xa, Math.min(ex + (x - 1 - ex) * t1, ex + (x - 1 - ex) * t2));
-                xb = Math.min(xb, Math.max(ex + (x + 2 - ex) * t1, ex + (x + 2 - ex) * t2));
+                xa = Math.max(xa, Math.min(ex + (x0 - ex) * t1, ex + (x0 - ex) * t2));
+                xb = Math.min(xb, Math.max(ex + (x0 + width - ex) * t1, ex + (x0 + width - ex) * t2));
                 ya = Math.max(ya, Math.min(ey + (y - ey) * t1, ey + (y - ey) * t2));
-                yb = Math.min(yb, Math.max(ey + (y + 3 - ey) * t1, ey + (y + 3 - ey) * t2));
+                yb = Math.min(yb, Math.max(ey + (y + height - ey) * t1, ey + (y + height - ey) * t2));
             }
             int rx0 = Math.max(-Snapshot.SIDE, (int) Math.floor(xa) - x), rx1 = Math.min(Snapshot.SIDE, (int) Math.ceil(xb) - 1 - x);
             int ry0 = Math.max(-Snapshot.BELOW, (int) Math.floor(ya) - y), ry1 = Math.min(Snapshot.ABOVE - 1, (int) Math.ceil(yb) - 1 - y);
@@ -320,30 +336,32 @@ public final class Portal {
     private Location riftEdge(double outside) {
         var random = ThreadLocalRandom.current();
         double t = random.nextDouble();
-        double half = .8 * Math.pow(Math.sin(Math.PI * t), .95) * .9 + outside;
+        double half = .8 * width / 3.0 * Math.pow(Math.sin(Math.PI * t), .95) * .9 + outside;
         double side = random.nextBoolean() ? 1 : -1;
-        return at(x - 1 + 1.5 + side * half + (random.nextDouble() - .5) * .3, y - .25 + 4.6 * t, z + .02);
+        return at(x0 + width / 2.0 + side * half + (random.nextDouble() - .5) * .3, y - .25 + height * 1.533 * t, z + .02);
     }
 
     public void particles() {
         if (rift) { riftParticles(); return; }
         var random = ThreadLocalRandom.current();
         for (Player p : world.getPlayers()) {
-            if (p.getLocation().distanceSquared(at(x + .5, y + 1.5, z)) > 400) continue;
+            if (p.getLocation().distanceSquared(at(x0 + width / 2.0, y + height / 2.0, z)) > 400 + width * width * 4) continue;
             for (int i = 0; i < 3; i++) {
                 // sparks wandering along the edge of the opening
-                double u = random.nextDouble() * 12, px, py;
-                if (u < 3) { px = x - 1 + u; py = y + 3; } else if (u < 6) { px = x + 2; py = y + 3 - (u - 3); }
-                else if (u < 9) { px = x + 2 - (u - 6); py = y; } else { px = x - 1; py = y + (u - 9); }
+                double u = random.nextDouble() * (2 * width + 2 * height), px, py;
+                if (u < width) { px = x0 + u; py = y + height; }
+                else if (u < width + height) { px = x0 + width; py = y + height - (u - width); }
+                else if (u < 2 * width + height) { px = x0 + width - (u - width - height); py = y; }
+                else { px = x0; py = y + (u - 2 * width - height); }
                 p.spawnParticle(reachable ? Particle.END_ROD : Particle.SMOKE, px, py, z + .05, 0, 0, .02, 0, .3);
             }
-            if (!reachable) p.spawnParticle(Particle.PORTAL, x + .5, y + 1.5, z + .1, 12, .9, .9, .05, .2);
+            if (!reachable) p.spawnParticle(Particle.PORTAL, x0 + width / 2.0, y + height / 2.0, z + .1, 12, width * .3, height * .3, .05, .2);
         }
     }
 
     private void riftParticles() {
         var random = ThreadLocalRandom.current();
-        Location centre = at(x + .5, y + 1.65, z);
+        Location centre = at(x0 + width / 2.0, y + height * .55, z);
         ticks++;
         for (Player p : world.getPlayers()) {
             double distance = p.getLocation().distanceSquared(centre);
@@ -367,12 +385,12 @@ public final class Portal {
         double share = (from.getZ() - plane) / (from.getZ() - to.getZ());
         double across = from.getX() + (to.getX() - from.getX()) * share;
         double feet = from.getY() + (to.getY() - from.getY()) * share;
-        return Math.abs(across - (x + .5)) <= 1.5 && feet >= y - 1.1 && feet < y + 3;
+        return across >= x0 && across <= x0 + width && feet >= y - 1.1 && feet < y + height;
     }
 
     /** Where players arriving through this portal's counterpart are placed: in front of it, facing south. */
     public Location arrival() {
-        Location spot = at(x + .5, y, z + 2.5);
+        Location spot = at(x0 + width / 2.0, y, z + 2.5);
         int ground = world.getHighestBlockYAt(x, z + 2, HeightMap.MOTION_BLOCKING) + 1;
         if (Math.abs(ground - y) <= 2) spot.setY(ground);
         spot.setYaw(0);

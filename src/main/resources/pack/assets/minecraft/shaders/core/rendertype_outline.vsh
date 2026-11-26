@@ -53,7 +53,7 @@ void main() {
         dpD4 = vec4(rotation[0], camera.x);
         dpD5 = vec4(rotation[1], camera.y);
         dpD6 = vec4(rotation[2], camera.z);
-        dpD7 = vec4(float(scene), DP_MAGIC, float(dp_marker_style(Color)), GameTime);
+        dpD7 = vec4(float(scene), DP_MAGIC, float(dp_marker_code(Color)), GameTime);
         dpMarker = 1;
 
         int corner = gl_VertexIndex % 4;
