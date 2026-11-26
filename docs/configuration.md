@@ -82,6 +82,7 @@ One entry per portal on this server. The key is the **target server**.
 | `style` | `gate` | The look, see [Styles](#styles): `gate`, `rift`, `inferno`, `storm`, `void`, `frost`. |
 | `x`, `y`, `z` | auto | Position of the portal (see below). If missing, MagicPortals places the portal on flat ground near the world spawn and writes the coordinates back. |
 | `facing` | `south` | Direction the opening faces, i.e. the side players walk in from: `south`, `north`, `east` or `west`. `/mp set` fills this in for you. |
+| `world` | main world | World the portal stands in, e.g. `world_nether` or `world_the_end`. `/mp set` fills this in with the world you are in. |
 | `frame.outer` | `STONE_BRICKS` | Outer wall blocks (style `gate`). Any block material. |
 | `frame.inner` | `POLISHED_BLACKSTONE_BRICKS` | Ring around the opening (style `gate`). |
 | `frame` | – | Set to `none` for no wall at all (you build the frame yourself). The Portal Wand sets this automatically. |

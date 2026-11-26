@@ -199,7 +199,9 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             Style style = Style.parse(p.getString("style", "gate"));
             if (style == null) { getLogger().warning("Unknown style for portal " + target + ": " + p.getString("style") + " – using gate"); style = Style.GATE; }
             boolean noFrame = "none".equalsIgnoreCase(p.getString("frame"));
-            portals.add(new Portal(this, world, target, name, pos[0], pos[1], pos[2],
+            World portalWorld = p.contains("world") ? Bukkit.getWorld(p.getString("world")) : world;
+            if (portalWorld == null) { getLogger().warning("Portal to " + target + ": world " + p.getString("world") + " not found – skipped"); continue; }
+            portals.add(new Portal(this, portalWorld, target, name, pos[0], pos[1], pos[2],
                     Facing.parse(p.getString("facing", "south")), p.getInt("width", 3), p.getInt("height", 3),
                     noFrame ? null : material(p.getString("frame.outer"), Material.STONE_BRICKS),
                     noFrame ? null : material(p.getString("frame.inner"), Material.POLISHED_BLACKSTONE_BRICKS),
@@ -317,7 +319,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         if (tick % 1200 == 600) for (Portal p : portals) p.startCapture();
         for (Portal p : portals) { var done = p.captureStep(server); if (done != null) save(done); }
         if (tick % 2 == 0 && getConfig().getBoolean("fallback-blocks", false))
-            for (Player player : world.getPlayers()) for (Portal p : portals) p.updateFallback(player, tick);
+            for (Player player : Bukkit.getOnlinePlayers()) for (Portal p : portals) p.updateFallback(player, tick);
         if (tick % 4 == 0) for (Portal p : portals) p.particles();
         tick = (tick + 1) % 1200;
     }
@@ -325,7 +327,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
     // ---------- walking through and arriving ----------
 
     @EventHandler(ignoreCancelled = true) public void onMove(PlayerMoveEvent e) {
-        if (e.getFrom().getWorld() != world || e.getTo().getWorld() != world) return;
+        if (e.getFrom().getWorld() != e.getTo().getWorld()) return;
         for (Portal p : portals) if (p.walkedThrough(e.getFrom(), e.getTo())) { travel(e.getPlayer(), p); return; }
     }
 
@@ -373,7 +375,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
     }
 
     @EventHandler public void onTeleport(PlayerTeleportEvent e) {
-        if (e.getTo().getWorld() != world) for (Portal p : portals) p.reset(e.getPlayer());
+        for (Portal p : portals) if (e.getTo().getWorld() != p.world()) p.reset(e.getPlayer());
     }
 
     // ---------- portal wand ----------
@@ -491,7 +493,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             case "list" -> {
                 sender.sendMessage(text("list.header", server, exchangeName()));
                 if (portals.isEmpty()) sender.sendMessage(text("list.none"));
-                for (Portal p : portals) sender.sendMessage(Component.text("  → " + p.target + "  " + p.x + " " + p.y + " " + p.z + " " + facingName(p.facing) + "  " + messages.get("style." + p.style.id) + "  ")
+                for (Portal p : portals) sender.sendMessage(Component.text("  → " + p.target + "  " + p.x + " " + p.y + " " + p.z + (p.world() == world ? "" : " [" + p.world().getName() + "]") + " " + facingName(p.facing) + "  " + messages.get("style." + p.style.id) + "  ")
                         .append(p.reachable() ? Component.text(messages.get("list.online"), NamedTextColor.GREEN) : Component.text(messages.get("list.offline"), NamedTextColor.RED))
                         .append(Component.text(p.scene() == null ? messages.get("list.noscene") : messages.get("list.scene", p.scene()), NamedTextColor.GRAY)));
             }
@@ -506,7 +508,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                     // opening marked with the wand: exactly these blocks, no frame (built by hand),
                     // facing the side the player stands on
                     Location a = sel[0], b = sel[1];
-                    Placement pl = a.getWorld() == world && b.getWorld() == world ? placement(a, b, player.getLocation()) : null;
+                    Placement pl = a.getWorld() == b.getWorld() && a.getWorld() == player.getWorld() ? placement(a, b, player.getLocation()) : null;
                     if (pl == null) { sender.sendMessage(error("wand.flat")); return true; }
                     if (pl.width > Portal.MAX_SIZE || pl.height > Portal.MAX_SIZE) { sender.sendMessage(error("wand.size", Portal.MAX_SIZE)); return true; }
                     getConfig().set(path + ".x", pl.x);
@@ -529,6 +531,8 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                     getConfig().set(path + ".facing", facing.name().toLowerCase(Locale.ROOT));
                     sender.sendMessage(text("set.done", target, facingName(facing)));
                 }
+                // the portal stands in the world the player is in (overworld, nether, end, any other world)
+                getConfig().set(path + ".world", player.getWorld().equals(Bukkit.getWorlds().getFirst()) ? null : player.getWorld().getName());
                 if (!getConfig().contains(path + ".style")) getConfig().set(path + ".style", "gate");
                 if (args.length >= 3) getConfig().set(path + ".name", String.join(" ", Arrays.copyOfRange(args, 2, args.length)));
                 saveConfig();

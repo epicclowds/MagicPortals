@@ -93,6 +93,7 @@ public final class Portal {
     public static String key(String server, String target) { return server + "@" + target; }
 
     public boolean near(int px, int pz, int distance) { return Math.abs(px - x) < distance && Math.abs(pz - z) < distance; }
+    public World world() { return world; }
     public boolean reachable() { return reachable; }
     public Integer scene() { return scene; }
 
