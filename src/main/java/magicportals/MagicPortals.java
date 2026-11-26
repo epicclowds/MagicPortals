@@ -199,7 +199,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                     Facing.parse(p.getString("facing", "south")), p.getInt("width", 3), p.getInt("height", 3),
                     noFrame ? null : material(p.getString("frame.outer"), Material.STONE_BRICKS),
                     noFrame ? null : material(p.getString("frame.inner"), Material.POLISHED_BLACKSTONE_BRICKS),
-                    style.equals("rift"), p.getBoolean("inside-view", false), messages.get("offline.sign")));
+                    style.equals("rift"), p.getBoolean("inside-view", false), p.getBoolean("barriers", true), messages.get("offline.sign")));
         }
         scenesVersion = -1;
         for (Portal p : portals) {
@@ -458,6 +458,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             case "setzen" -> "set";
             case "entfernen" -> "remove";
             case "stil" -> "style";
+            case "bearbeiten" -> "edit";
             case "aktualisieren" -> "update";
             case "neuladen" -> "reload";
             default -> input.toLowerCase(Locale.ROOT);
@@ -536,21 +537,94 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                 load();
                 sender.sendMessage(text("style.done", args[1], style));
             }
+            case "edit" -> edit(sender, args);
             case "reload" -> { load(); pack.startWebServer(); sender.sendMessage(text("reload.done", portals.size())); }
             case "update" -> update(sender);
             default -> {
-                for (String help : List.of("help.list", "help.wand", "help.set", "help.remove", "help.style", "help.update", "help.reload")) sender.sendMessage(text(help));
+                for (String help : List.of("help.list", "help.wand", "help.set", "help.edit", "help.remove", "help.style", "help.update", "help.reload")) sender.sendMessage(text(help));
             }
         }
         return true;
     }
 
+    /** Settings that /mp edit can change, with their possible values (for tab completion). */
+    private static final Map<String, List<String>> EDITABLE = new LinkedHashMap<>();
+    static {
+        EDITABLE.put("name", List.of());
+        EDITABLE.put("style", List.of("gate", "rift"));
+        EDITABLE.put("facing", List.of("south", "north", "east", "west"));
+        EDITABLE.put("width", List.of("1", "2", "3", "4", "5", "6", "7"));
+        EDITABLE.put("height", List.of("1", "2", "3", "4", "5", "6", "7"));
+        EDITABLE.put("inside-view", List.of("true", "false"));
+        EDITABLE.put("barriers", List.of("true", "false"));
+        EDITABLE.put("frame", List.of("none", "wall"));
+    }
+
+    /** /mp edit <server> [setting] [value]: shows or changes a setting of an existing portal. */
+    private void edit(CommandSender sender, String[] args) {
+        if (args.length < 2) { sender.sendMessage(error("edit.usage")); return; }
+        String path = "portals." + args[1];
+        if (!getConfig().isConfigurationSection(path)) { sender.sendMessage(error("remove.unknown")); return; }
+        Portal portal = portals.stream().filter(p -> p.target.equals(args[1])).findFirst().orElse(null);
+        if (args.length < 4) {
+            // show the current settings
+            var c = getConfig();
+            sender.sendMessage(text("edit.header", args[1]));
+            for (String key : EDITABLE.keySet()) {
+                Object value = switch (key) {
+                    case "name" -> portal != null ? portal.name : c.getString(path + ".name", args[1]);
+                    case "style" -> c.getString(path + ".style", "gate");
+                    case "facing" -> c.getString(path + ".facing", "south");
+                    case "width" -> c.getInt(path + ".width", 3);
+                    case "height" -> c.getInt(path + ".height", 3);
+                    case "inside-view" -> c.getBoolean(path + ".inside-view", false);
+                    case "barriers" -> c.getBoolean(path + ".barriers", true);
+                    default -> "none".equalsIgnoreCase(c.getString(path + ".frame")) ? "none" : "wall";
+                };
+                sender.sendMessage(Component.text("  " + key + ": ", NamedTextColor.GRAY).append(Component.text(String.valueOf(value))));
+            }
+            sender.sendMessage(text("edit.hint", args[1]));
+            return;
+        }
+        String key = args[2].toLowerCase(Locale.ROOT), raw = String.join(" ", Arrays.copyOfRange(args, 3, args.length)), value = raw.toLowerCase(Locale.ROOT);
+        if (key.equals("insideview") || key.equals("inside")) key = "inside-view";
+        if (!EDITABLE.containsKey(key)) { sender.sendMessage(error("edit.unknown", key, String.join(", ", EDITABLE.keySet()))); return; }
+        Object stored;
+        switch (key) {
+            case "name" -> stored = raw;
+            case "style" -> stored = switch (value) { case "riss", "rift" -> "rift"; case "tor", "gate" -> "gate"; default -> null; };
+            case "facing" -> stored = EDITABLE.get("facing").contains(value) ? value : null;
+            case "width", "height" -> {
+                int n;
+                try { n = Integer.parseInt(value); } catch (NumberFormatException e) { n = 0; }
+                stored = n >= 1 && n <= Portal.MAX_SIZE ? n : null;
+            }
+            case "inside-view", "barriers" -> stored = switch (value) { case "true", "on", "yes", "an", "ja" -> true; case "false", "off", "no", "aus", "nein" -> false; default -> null; };
+            default -> stored = value.equals("none") ? "none" : value.equals("wall") ? "wall" : null;
+        }
+        if (stored == null) { sender.sendMessage(error("edit.invalid", raw, key, String.join(", ", EDITABLE.get(key)))); return; }
+        if (key.equals("frame") && stored.equals("wall")) getConfig().set(path + ".frame", null);   // default wall
+        else getConfig().set(path + "." + key, stored);
+        saveConfig();
+        load();
+        sender.sendMessage(text("edit.done", args[1], key, String.valueOf(stored)));
+        // the views through both portals are baked with the portal's size and direction
+        if (key.equals("facing") || key.equals("width") || key.equals("height")) sender.sendMessage(text("edit.update"));
+    }
+
     @Override public List<String> onTabComplete(CommandSender sender, Command cmd, String label, String[] args) {
-        if (args.length == 1) return List.of("list", "wand", "set", "remove", "style", "update", "reload").stream().filter(s -> s.startsWith(args[0].toLowerCase(Locale.ROOT))).toList();
-        String sub = subCommand(args[0]);
-        if (args.length == 2 && (sub.equals("remove") || sub.equals("style"))) return portals.stream().map(p -> p.target).toList();
-        if (args.length == 3 && sub.equals("style")) return List.of("gate", "rift");
-        return List.of();
+        String input = args[args.length - 1].toLowerCase(Locale.ROOT);
+        List<String> options = List.of();
+        if (args.length == 1) options = List.of("list", "wand", "set", "edit", "remove", "style", "update", "reload");
+        else {
+            String sub = subCommand(args[0]);
+            if (args.length == 2 && (sub.equals("remove") || sub.equals("style") || sub.equals("edit") || sub.equals("set")))
+                options = portals.stream().map(p -> p.target).toList();
+            else if (args.length == 3 && sub.equals("style")) options = List.of("gate", "rift");
+            else if (args.length == 3 && sub.equals("edit")) options = List.copyOf(EDITABLE.keySet());
+            else if (args.length == 4 && sub.equals("edit")) options = EDITABLE.getOrDefault(args[2].toLowerCase(Locale.ROOT), List.of());
+        }
+        return options.stream().filter(s -> s.startsWith(input)).toList();
     }
 
     /** Bakes all scenes and delivers the resource pack. Only on the server with resource-pack.enabled. */

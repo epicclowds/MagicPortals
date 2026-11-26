@@ -32,6 +32,7 @@ public final class Portal {
     public final Facing facing;
     public final boolean rift;         // style "rift": floating dimensional crack instead of a gate
     public final boolean insideView;   // cameras can fly "into" the destination behind the opening
+    public final boolean barriers;     // with insideView: invisible barriers keep players out of the space behind
     private final int anchor;          // local column of the anchor cell
     private final double ox, oy, oz;   // world position of the local origin
 
@@ -65,10 +66,10 @@ public final class Portal {
     public record Capture(String key, Snapshot front, Snapshot back) { }
 
     public Portal(Plugin plugin, World world, String target, String name, int x, int y, int z, Facing facing, int width, int height,
-                  Material outer, Material inner, boolean rift, boolean insideView, String offlineLabel) {
+                  Material outer, Material inner, boolean rift, boolean insideView, boolean barriers, String offlineLabel) {
         this.plugin = plugin; this.world = world; this.target = target; this.name = name;
         this.x = x; this.y = y; this.z = z; this.facing = facing;
-        this.outer = outer; this.inner = inner; this.rift = rift; this.insideView = insideView;
+        this.outer = outer; this.inner = inner; this.rift = rift; this.insideView = insideView; this.barriers = barriers;
         this.width = Math.max(1, Math.min(MAX_SIZE, width));
         this.height = Math.max(1, Math.min(MAX_SIZE, height));
         this.anchor = (this.width - 1) / 2;
@@ -139,8 +140,8 @@ public final class Portal {
         Location origin = at(0, 0, 0);
         world.getChunkAt(origin.getBlockX() >> 4, origin.getBlockZ() >> 4).addPluginChunkTicket(plugin);
         // With the in-between view, the shader shows the destination all around a camera right behind the
-        // opening (3 blocks deep); barriers keep normal players out of there.
-        if (insideView) for (int i = 0; i < width; i++) for (int j = 0; j < height; j++) for (int k = -3; k <= -1; k++) barrier(i, j, k);
+        // opening (3 blocks deep); barriers keep normal players out of there (option "barriers").
+        if (insideView && barriers) for (int i = 0; i < width; i++) for (int j = 0; j < height; j++) for (int k = -3; k <= -1; k++) barrier(i, j, k);
         if (rift) buildRift(); else if (outer != null) buildWall();
         // Marker for the portal shader at the local origin. Its glow colour carries scene, facing, style,
         // options and size (R=254, G=markerCode, B=160+scene+16*facing).
