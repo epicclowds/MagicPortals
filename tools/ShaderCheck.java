@@ -12,7 +12,9 @@ import static org.lwjgl.util.shaderc.Shaderc.*;
  * and, if used, Ultimate UI's include folder (for hud.glsl). */
 public final class ShaderCheck {
     private static final List<Path> includeFolders = new ArrayList<>();
-    private static final Pattern INCLUDE = Pattern.compile("(?m)^\\s*#include\\s*<(?:minecraft:)?([^>]+)>\\s*$");
+    /** Defines the game compiles core shaders with (no define = the normal variant). */
+    private static final List<String> VARIANTS = List.of("", "IS_GUI", "IS_SEE_THROUGH");
+    private static final Pattern INCLUDE = Pattern.compile("(?m)^\\s*#include\\s*<(?:[a-z0-9_.-]+:)?([^>]+)>\\s*$");
 
     public static void main(String[] args) throws Exception {
         Path shaders = Path.of(args[0]).resolve("assets/minecraft/shaders");
@@ -26,15 +28,20 @@ public final class ShaderCheck {
         int errors = 0;
         try (var files = Files.walk(shaders)) {
             for (Path p : files.filter(f -> f.toString().endsWith(".vsh") || f.toString().endsWith(".fsh")).toList()) {
-                String source = expandIncludes(Files.readString(p), new HashSet<>()).replaceFirst("#version 330", "#version 450");
+                String base = expandIncludes(Files.readString(p), new HashSet<>()).replaceFirst("#version 330", "#version 450");
                 int kind = p.toString().endsWith(".vsh") ? shaderc_vertex_shader : shaderc_fragment_shader;
-                long result = shaderc_compile_into_spv(compiler, source, kind, shaders.relativize(p).toString(), "main", options);
-                String message = shaderc_result_get_error_message(result);
-                if (shaderc_result_get_compilation_status(result) != shaderc_compilation_status_success) {
-                    errors++;
-                    System.out.println("ERROR  " + shaders.relativize(p) + ":\n" + message);
-                } else System.out.println("ok     " + shaders.relativize(p) + (message != null && !message.isBlank() ? "  (" + message.trim() + ")" : ""));
-                shaderc_result_release(result);
+                // the game compiles core shaders in variants (e.g. text for the GUI and for see-through text)
+                for (String variant : VARIANTS) {
+                    String source = variant.isEmpty() ? base : base.replaceFirst("#version 450", "#version 450\n#define " + variant);
+                    String name = shaders.relativize(p) + (variant.isEmpty() ? "" : " [" + variant + "]");
+                    long result = shaderc_compile_into_spv(compiler, source, kind, name, "main", options);
+                    String message = shaderc_result_get_error_message(result);
+                    if (shaderc_result_get_compilation_status(result) != shaderc_compilation_status_success) {
+                        errors++;
+                        System.out.println("ERROR  " + name + ":\n" + message);
+                    } else if (variant.isEmpty()) System.out.println("ok     " + name + (message != null && !message.isBlank() ? "  (" + message.trim() + ")" : ""));
+                    shaderc_result_release(result);
+                }
             }
         }
         shaderc_compile_options_release(options);
