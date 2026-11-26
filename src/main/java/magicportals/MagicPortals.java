@@ -486,8 +486,11 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
     private org.bukkit.inventory.ItemStack wand() {
         var item = new org.bukkit.inventory.ItemStack(Material.GOLDEN_PICKAXE);
         item.editMeta(meta -> {
-            meta.displayName(Component.text("Portal Wand", NamedTextColor.LIGHT_PURPLE).decoration(net.kyori.adventure.text.format.TextDecoration.ITALIC, false));
-            meta.lore(List.of(Component.text(messages.get("wand.lore1"), NamedTextColor.GRAY), Component.text(messages.get("wand.lore2"), NamedTextColor.GRAY)));
+            // name in the plugin gradient, lore without the default italics
+            meta.displayName(Component.text("✦ ", Chat.ACCENT).append(Chat.gradient("Portal Wand", true)).append(Component.text(" ✦", Chat.ACCENT))
+                    .decoration(net.kyori.adventure.text.format.TextDecoration.ITALIC, false));
+            meta.lore(List.of(Component.empty(), wandLore(messages.get("wand.lore1")), wandLore(messages.get("wand.lore2")), wandLore(messages.get("wand.lore3")),
+                    Component.empty(), Chat.gradient("MagicPortals", false).decoration(net.kyori.adventure.text.format.TextDecoration.ITALIC, false)));
             meta.setEnchantmentGlintOverride(true);
             // own model from the MagicPortals resource pack (a staff with a glowing crystal); off: plain golden pickaxe
             if (getConfig().getBoolean("wand-model", true)) meta.setItemModel(new org.bukkit.NamespacedKey("magicportals", "wand"));
@@ -495,6 +498,14 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             meta.getPersistentDataContainer().set(wandKey(), org.bukkit.persistence.PersistentDataType.BYTE, (byte) 1);
         });
         return item;
+    }
+
+    /** "Left-click: first corner" → the action highlighted, the rest grey, not italic. */
+    private static Component wandLore(String text) {
+        int colon = text.indexOf(':');
+        Component line = colon < 0 ? Component.text(text, Chat.TEXT)
+                : Component.text("› ", NamedTextColor.DARK_GRAY).append(Component.text(text.substring(0, colon), Chat.ACCENT)).append(Component.text(text.substring(colon), Chat.TEXT));
+        return line.decoration(net.kyori.adventure.text.format.TextDecoration.ITALIC, false);
     }
 
     private boolean isWand(org.bukkit.inventory.ItemStack item) {
