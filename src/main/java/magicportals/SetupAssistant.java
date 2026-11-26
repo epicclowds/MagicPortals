@@ -67,18 +67,18 @@ final class SetupAssistant {
 
     private String msg(String key, Object... values) { return plugin.messages().get(key, values); }
 
-    private Component button(String label, String command, NamedTextColor color, boolean run) {
+    private Component button(String label, String command, net.kyori.adventure.text.format.TextColor color, boolean run) {
         return Component.text(label, color, TextDecoration.BOLD)
                 .clickEvent(run ? ClickEvent.runCommand(command) : ClickEvent.suggestCommand(command))
                 .hoverEvent(HoverEvent.showText(Component.text(command, NamedTextColor.GRAY)));
     }
 
-    private Component run(String label, String command) { return button(label, command, NamedTextColor.GREEN, true); }
+    private Component run(String label, String command) { return button(label, command, Chat.SUCCESS, true); }
 
     private Component footer(boolean back) {
         Component c = Component.empty();
         if (back) c = c.append(button(msg("setup.btn.back"), "/mp setup back", NamedTextColor.YELLOW, true)).append(Component.text("  "));
-        return c.append(button(msg("setup.btn.cancel"), "/mp setup cancel", NamedTextColor.RED, true));
+        return c.append(button(msg("setup.btn.cancel"), "/mp setup cancel", Chat.ERROR, true));
     }
 
     // ---------- commands ----------
@@ -101,10 +101,10 @@ final class SetupAssistant {
             running.remove(p.getUniqueId());
             String key = key(p.getUniqueId());
             plugin.runAsync(ex -> { ex.deleteSnapshots(key); return null; });
-            p.sendMessage(Component.text(msg("setup.cancelled"), NamedTextColor.GRAY));
+            p.sendMessage(Chat.info(msg("setup.cancelled")));
             return;
         }
-        if (s == null) { p.sendMessage(Component.text(msg("setup.none"), NamedTextColor.RED)); return; }
+        if (s == null) { p.sendMessage(Chat.error(msg("setup.none"))); return; }
         switch (action) {
             case "back" -> {
                 int i = STEPS.indexOf(s.step);
@@ -120,7 +120,7 @@ final class SetupAssistant {
             }
             case "name" -> {
                 if (args.length < 3 || !args[1].matches("[A-Za-z0-9_-]{1,32}") || !args[2].matches("[A-Za-z0-9_-]{1,32}")) {
-                    p.sendMessage(Component.text(msg("setup.badname"), NamedTextColor.RED));
+                    p.sendMessage(Chat.error(msg("setup.badname")));
                     return;
                 }
                 s.name = args[1]; s.link = args[2];
@@ -169,7 +169,7 @@ final class SetupAssistant {
             } else if (s.target != null) {
                 Bukkit.getScheduler().runTaskLater(plugin, () -> {
                     if (!p.isOnline()) return;
-                    p.sendMessage(Component.text(msg("setup.elsewhere", s.target), NamedTextColor.YELLOW)
+                    p.sendMessage(Chat.info(plugin.messages().get("setup.elsewhere"), s.target)
                             .append(Component.text("  ")).append(run(msg("setup.btn.go", s.target), "/mp setup go")));
                     running.put(id, s);
                 }, 30);
@@ -211,11 +211,11 @@ final class SetupAssistant {
                 if (s.link == null) s.link = uniqueLink(s.origin + "-" + s.target);
                 lines.addAll(wrap(msg("setup.step3", s.target)));
                 lines.add(Component.empty());
-                lines.add(Component.text(msg("setup.label.name") + "  ", NamedTextColor.GRAY).append(Component.text(s.name, NamedTextColor.WHITE, TextDecoration.BOLD)));
-                lines.add(Component.text(msg("setup.label.id") + "  ", NamedTextColor.GRAY).append(Component.text(s.link, NamedTextColor.WHITE, TextDecoration.BOLD)));
+                lines.add(Component.text(msg("setup.label.name") + "  ", Chat.TEXT).append(Component.text(s.name, Chat.VALUE, TextDecoration.BOLD)));
+                lines.add(Component.text(msg("setup.label.id") + "  ", Chat.TEXT).append(Component.text(s.link, Chat.VALUE, TextDecoration.BOLD)));
                 lines.add(Component.empty());
                 String cmd = "/mp setup name " + s.name + " " + s.link;
-                lines.add(run(msg("setup.btn.accept"), cmd).append(Component.text("  ")).append(button(msg("setup.btn.edit"), cmd, NamedTextColor.AQUA, false)));
+                lines.add(run(msg("setup.btn.accept"), cmd).append(Component.text("  ")).append(button(msg("setup.btn.edit"), cmd, Chat.ACCENT, false)));
                 lines.add(footer(true));
             }
             case "style" -> {
@@ -261,7 +261,7 @@ final class SetupAssistant {
         box(p, step, lines);
     }
 
-    private static final Component RULE = Component.text(" ".repeat(80), NamedTextColor.DARK_GRAY, TextDecoration.STRIKETHROUGH);
+    private static final Component RULE = Chat.RULE;
 
     /**
      * Sends one framed setup message:
@@ -274,14 +274,14 @@ final class SetupAssistant {
     private void box(Player p, int step, List<Component> lines) {
         p.sendMessage(RULE);
         p.sendMessage(Component.empty());
-        p.sendMessage(Component.text(" ".repeat(20)).append(Component.text(msg("setup.title"), NamedTextColor.DARK_PURPLE, TextDecoration.BOLD)));
+        p.sendMessage(Component.text(" ".repeat(20)).append(Chat.gradient(msg("setup.title"), true)));
         p.sendMessage(Component.empty());
         if (step > 0) {
-            p.sendMessage(Component.text("   ").append(Component.text(msg("setup.step") + " ", NamedTextColor.GRAY, TextDecoration.BOLD))
-                    .append(Component.text(step, NamedTextColor.GRAY)).append(Component.text("/", NamedTextColor.GRAY, TextDecoration.BOLD))
-                    .append(Component.text("5", NamedTextColor.GRAY, TextDecoration.BOLD)));
+            p.sendMessage(Component.text("   ").append(Component.text(msg("setup.step") + " ", Chat.TEXT, TextDecoration.BOLD))
+                    .append(Component.text(step, Chat.VALUE)).append(Component.text("/", Chat.TEXT, TextDecoration.BOLD))
+                    .append(Component.text("5", Chat.TEXT, TextDecoration.BOLD)));
         } else {
-            p.sendMessage(Component.text("   ").append(Component.text(msg("setup.finished"), NamedTextColor.GREEN, TextDecoration.BOLD)));
+            p.sendMessage(Component.text("   ").append(Component.text(msg("setup.finished"), Chat.SUCCESS, TextDecoration.BOLD)));
         }
         p.sendMessage(Component.empty());
         for (Component line : lines) p.sendMessage(Component.text(" ").append(line));
@@ -295,11 +295,11 @@ final class SetupAssistant {
         for (String sentence : text.split("(?<=[.!?:])\s+(?=[A-ZÄÖÜ(])")) {
             var line = new StringBuilder();
             for (String word : sentence.split(" ")) {
-                if (line.length() > 0 && line.length() + word.length() > 50) { lines.add(Component.text(line.toString(), NamedTextColor.GRAY)); line.setLength(0); }
+                if (line.length() > 0 && line.length() + word.length() > 50) { lines.add(Component.text(line.toString(), Chat.TEXT)); line.setLength(0); }
                 if (line.length() > 0) line.append(' ');
                 line.append(word);
             }
-            if (line.length() > 0) lines.add(Component.text(line.toString(), NamedTextColor.GRAY));
+            if (line.length() > 0) lines.add(Component.text(line.toString(), Chat.TEXT));
         }
         return lines;
     }

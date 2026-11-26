@@ -413,7 +413,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         long now = System.currentTimeMillis();
         if (cooldown.getOrDefault(player.getUniqueId(), 0L) > now) return;
         cooldown.put(player.getUniqueId(), now + 5000);
-        if (!portal.reachable()) { player.sendMessage(Component.text(messages.get("offline.message", portal.name))); return; }
+        if (!portal.reachable()) { player.sendMessage(error("offline.message", portal.name)); return; }
         portal.playEnter(player);
         UUID id = player.getUniqueId();
         String self = server;
@@ -428,7 +428,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             catch (IOException e) { return; }
             player.sendPluginMessage(this, "BungeeCord", bytes.toByteArray());
             Bukkit.getScheduler().runTaskLater(this, () -> {
-                if (player.isOnline() && Bukkit.getPlayer(id) == player) player.sendMessage(Component.text(messages.get("connect.failed")));
+                if (player.isOnline() && Bukkit.getPlayer(id) == player) player.sendMessage(error("connect.failed"));
             }, 100);
         });
     }
@@ -652,8 +652,11 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
 
     // ---------- commands ----------
 
-    private Component text(String key, Object... values) { return Component.text(messages.get(key, values)); }
-    private Component error(String key, Object... values) { return Component.text(messages.get(key, values), NamedTextColor.RED); }
+    private Component text(String key, Object... values) {
+        // confirmations ("….done") in green, everything else in the normal text colour
+        return key.endsWith(".done") ? Chat.success(messages.get(key), values) : Chat.info(messages.get(key), values);
+    }
+    private Component error(String key, Object... values) { return Chat.error(messages.get(key), values); }
 
     /** Maps the old German sub-commands of Dorfportal to the English ones. */
     private static String subCommand(String input) {
@@ -674,11 +677,22 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         String sub = args.length == 0 ? "help" : subCommand(args[0]);
         switch (sub) {
             case "list" -> {
-                sender.sendMessage(text("list.header", server, exchangeName()));
-                if (portals.isEmpty()) sender.sendMessage(text("list.none"));
-                for (Portal p : portals) sender.sendMessage(Component.text("  " + p.id + (p.id.equals(p.target) && p.link == null ? "" : " → " + p.target) + (p.link == null ? "" : " #" + p.link) + "  " + p.x + " " + p.y + " " + p.z + (p.world() == world ? "" : " [" + p.world().getName() + "]") + " " + facingName(p.facing) + "  " + messages.get("style." + p.style.id) + "  ")
-                        .append(p.reachable() ? Component.text(messages.get("list.online"), NamedTextColor.GREEN) : Component.text(messages.get("list.offline"), NamedTextColor.RED))
-                        .append(Component.text(p.scene() == null ? messages.get("list.noscene") : messages.get("list.scene", p.scene()), NamedTextColor.GRAY)));
+                var lines = new ArrayList<Component>();
+                if (portals.isEmpty()) lines.add(Component.text(messages.get("list.none").trim(), Chat.TEXT));
+                for (Portal p : portals) {
+                    // ● name → target #id          (green = target online)
+                    //     x y z [world] · facing · style · scene
+                    Component head = Component.text("● ", p.reachable() ? Chat.SUCCESS : Chat.ERROR)
+                            .append(Chat.bold(p.id, NamedTextColor.WHITE));
+                    if (!(p.id.equals(p.target) && p.link == null)) head = head.append(Component.text("  → ", NamedTextColor.DARK_GRAY)).append(Component.text(p.target, Chat.ACCENT));
+                    if (p.link != null) head = head.append(Component.text("  #" + p.link, Chat.VALUE));
+                    lines.add(head);
+                    String where = p.x + " " + p.y + " " + p.z + (p.world() == world ? "" : " [" + p.world().getName() + "]");
+                    lines.add(Component.text("    " + where + "  ·  " + facingName(p.facing) + "  ·  " + messages.get("style." + p.style.id) + "  ·  ", Chat.TEXT)
+                            .append(p.reachable() ? Component.text(messages.get("list.online"), Chat.SUCCESS) : Component.text(messages.get("list.offline"), Chat.ERROR))
+                            .append(Component.text("  ·  " + (p.scene() == null ? messages.get("list.noscene") : messages.get("list.scene", p.scene())).trim(), Chat.TEXT)));
+                }
+                Chat.box(sender, "MagicPortals", Chat.format(messages.get("list.header"), new Object[]{server, exchangeName()}, Chat.TEXT, Chat.VALUE), lines);
             }
             case "set" -> {
                 if (!(sender instanceof Player player)) { sender.sendMessage(error("only.ingame")); return true; }
@@ -727,7 +741,18 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             case "reload" -> { load(); pack.startWebServer(); sender.sendMessage(text("reload.done", portals.size())); }
             case "update" -> update(sender);
             default -> {
-                for (String help : List.of("help.setup", "help.list", "help.wand", "help.set", "help.edit", "help.remove", "help.style", "help.update", "help.reload")) sender.sendMessage(text(help));
+                var lines = new ArrayList<Component>();
+                for (String help : List.of("help.setup", "help.list", "help.wand", "help.set", "help.edit", "help.remove", "help.style", "help.update", "help.reload")) {
+                    // "/mp command – description": command clickable (fills the chat line), description below in grey
+                    String line = messages.get(help);
+                    int dash = line.indexOf(" – ");
+                    String command = (dash < 0 ? line : line.substring(0, dash)).replace("/magicportals ", "/mp ");
+                    String base = command.contains(" <") ? command.substring(0, command.indexOf(" <")) : command.contains(" [") ? command.substring(0, command.indexOf(" [")) : command;
+                    lines.add(Component.text(command, Chat.ACCENT).clickEvent(net.kyori.adventure.text.event.ClickEvent.suggestCommand(base + " "))
+                            .hoverEvent(net.kyori.adventure.text.event.HoverEvent.showText(Component.text(base, Chat.TEXT))));
+                    if (dash >= 0) lines.add(Component.text("   " + line.substring(dash + 3), Chat.TEXT));
+                }
+                Chat.box(sender, "MagicPortals", Component.text(messages.get("help.title"), Chat.TEXT), lines);
             }
         }
         return true;
@@ -804,7 +829,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         if (args.length < 4) {
             // show the current settings
             var c = getConfig();
-            sender.sendMessage(text("edit.header", args[1]));
+            var lines = new ArrayList<Component>();
             for (String key : EDITABLE.keySet()) {
                 if (key.startsWith("sound.")) continue;   // shown below, only the ones that are set
                 Object value = switch (key) {
@@ -831,13 +856,19 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                     case "blur" -> c.getDouble(path + ".view.blur", 1.0);
                     default -> "none".equalsIgnoreCase(c.getString(path + ".frame")) ? "none" : "wall";
                 };
-                sender.sendMessage(Component.text("  " + key + ": ", NamedTextColor.GRAY).append(Component.text(String.valueOf(value))));
+                if (key.equals("time") || key.equals("sound")) lines.add(Component.empty());   // groups: portal · options · view
+                // click a line to put "/mp edit <portal> <setting> " into the chat
+                lines.add(Component.text(key + "  ", Chat.TEXT).append(Component.text(String.valueOf(value), Chat.VALUE))
+                        .clickEvent(net.kyori.adventure.text.event.ClickEvent.suggestCommand("/mp edit " + args[1] + " " + key + " "))
+                        .hoverEvent(net.kyori.adventure.text.event.HoverEvent.showText(Component.text("/mp edit " + args[1] + " " + key + " …", Chat.TEXT))));
             }
             for (String slot : Portal.SOUND_SLOTS) {
                 String s = c.getString(path + ".sounds." + slot);
-                if (s != null) sender.sendMessage(Component.text("  sound." + slot + ": ", NamedTextColor.GRAY).append(Component.text(s)));
+                if (s != null) lines.add(Component.text("sound." + slot + "  ", Chat.TEXT).append(Component.text(s, Chat.VALUE)));
             }
-            sender.sendMessage(text("edit.hint", args[1]));
+            lines.add(Component.empty());
+            lines.add(Component.text(messages.get("edit.hint", args[1]), Chat.TEXT));
+            Chat.box(sender, "MagicPortals", Chat.format(messages.get("edit.header"), new Object[]{args[1]}, Chat.TEXT, Chat.VALUE), lines);
             return;
         }
         String key = args[2].toLowerCase(Locale.ROOT), raw = String.join(" ", Arrays.copyOfRange(args, 3, args.length)), value = raw.toLowerCase(Locale.ROOT);
