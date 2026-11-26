@@ -182,9 +182,11 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         world = Bukkit.getWorlds().getFirst();
 
         var section = c.getConfigurationSection("portals");
+        var viewData = new LinkedHashMap<String, byte[]>();
         if (section != null) for (String target : section.getKeys(false)) {
             ConfigurationSection p = section.getConfigurationSection(target);
             if (p == null) continue;
+            viewData.put(Portal.key(target, server), viewSettings(p).getBytes(java.nio.charset.StandardCharsets.UTF_8));
             int[] pos;
             if (p.contains("x") && p.contains("y") && p.contains("z")) pos = new int[]{p.getInt("x"), p.getInt("y"), p.getInt("z")};
             else {
@@ -205,6 +207,8 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                     p.getBoolean("sound", false), (float) p.getDouble("volume", 1.0), p.getDouble("particles", 1.0), p.getBoolean("effects", false),
                     messages.get("offline.sign")));
         }
+        // the view settings belong to the scene this portal shows, i.e. the snapshot "<target>@<server>"
+        async(ex -> { for (var e : viewData.entrySet()) ex.saveSnapshot(e.getKey(), Exchange.VIEW, e.getValue()); return null; }, null);
         scenesVersion = -1;
         for (Portal p : portals) {
             p.build();
@@ -212,6 +216,18 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             getLogger().info("Portal " + server + " -> " + p.target + " at " + p.x + " " + p.y + " " + p.z + " (" + p.style.id + ")");
         }
         sync();
+    }
+
+    /** Settings of the view through a portal (section "view"). */
+    static final List<String> VIEW_KEYS = List.of("time", "fog", "fog-color", "tint", "tint-strength", "weather");
+
+    /** The view settings of a portal as text ("time=night;fog=1.5;…"), read by the scene baker. */
+    private static String viewSettings(ConfigurationSection portal) {
+        var view = portal.getConfigurationSection("view");
+        if (view == null) return "";
+        var parts = new ArrayList<String>();
+        for (String key : VIEW_KEYS) if (view.contains(key)) parts.add(key + "=" + view.get(key));
+        return String.join(";", parts);
     }
 
     private static Material material(String text, Material fallback) {
@@ -568,6 +584,27 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         EDITABLE.put("particles", List.of("0", "0.5", "1", "2", "3", "5"));
         EDITABLE.put("effects", List.of("true", "false"));
         EDITABLE.put("frame", List.of("none", "wall"));
+        // the view through the portal (needs /mp update)
+        EDITABLE.put("time", List.of("day", "sunset", "night"));
+        EDITABLE.put("fog", List.of("0", "0.5", "1", "2", "4", "8"));
+        EDITABLE.put("fog-color", List.of("none", "blue", "red", "green", "purple", "orange", "white", "#3050ff"));
+        EDITABLE.put("tint", List.of("none", "blue", "red", "green", "purple", "orange", "yellow", "#ff6040"));
+        EDITABLE.put("tint-strength", List.of("0.25", "0.5", "0.75", "1"));
+        EDITABLE.put("weather", List.of("none", "rain", "snow", "ash", "embers"));
+    }
+
+    private static final Map<String, String> COLOR_NAMES = Map.ofEntries(
+            Map.entry("blue", "#3060ff"), Map.entry("blau", "#3060ff"), Map.entry("red", "#ff3020"), Map.entry("rot", "#ff3020"),
+            Map.entry("green", "#30e060"), Map.entry("grün", "#30e060"), Map.entry("purple", "#a040ff"), Map.entry("lila", "#a040ff"),
+            Map.entry("orange", "#ff8020"), Map.entry("yellow", "#ffe040"), Map.entry("gelb", "#ffe040"), Map.entry("white", "#ffffff"),
+            Map.entry("weiß", "#ffffff"), Map.entry("pink", "#ff60c0"), Map.entry("cyan", "#40e0ff"), Map.entry("grey", "#808080"),
+            Map.entry("gray", "#808080"), Map.entry("grau", "#808080"), Map.entry("black", "#101010"), Map.entry("schwarz", "#101010"));
+
+    /** A colour as "#rrggbb" from a name or hex code; "none" to remove; null if invalid. */
+    private static String color(String value) {
+        if (List.of("none", "off", "aus", "default").contains(value)) return "none";
+        String hex = COLOR_NAMES.getOrDefault(value, value.startsWith("#") ? value : "#" + value);
+        return hex.matches("#[0-9a-f]{6}") ? hex : null;
     }
 
     /** /mp edit <server> [setting] [value]: shows or changes a setting of an existing portal. */
@@ -594,6 +631,12 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                     case "volume" -> c.getDouble(path + ".volume", 1.0);
                     case "particles" -> c.getDouble(path + ".particles", 1.0);
                     case "effects" -> c.getBoolean(path + ".effects", false);
+                    case "time" -> c.getString(path + ".view.time", "day");
+                    case "fog" -> c.getDouble(path + ".view.fog", 1.0);
+                    case "fog-color" -> c.getString(path + ".view.fog-color", "none");
+                    case "tint" -> c.getString(path + ".view.tint", "none");
+                    case "tint-strength" -> c.getDouble(path + ".view.tint-strength", 0.5);
+                    case "weather" -> c.getString(path + ".view.weather", "none");
                     default -> "none".equalsIgnoreCase(c.getString(path + ".frame")) ? "none" : "wall";
                 };
                 sender.sendMessage(Component.text("  " + key + ": ", NamedTextColor.GRAY).append(Component.text(String.valueOf(value))));
@@ -608,10 +651,13 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         switch (key) {
             case "name" -> stored = raw;
             case "style" -> { Style s = Style.parse(value); stored = s == null ? null : s.id; }
-            case "volume", "particles" -> {
+            case "time", "weather" -> stored = EDITABLE.get(key).contains(value) ? value : null;
+            case "fog-color", "tint" -> stored = color(value);
+            case "volume", "particles", "fog", "tint-strength" -> {
                 double v;
                 try { v = Double.parseDouble(value.replace(',', '.')); } catch (NumberFormatException e) { v = -1; }
-                stored = v >= 0 && v <= (key.equals("volume") ? 4 : 5) ? v : null;
+                double max = switch (key) { case "volume" -> 4; case "fog" -> 8; case "tint-strength" -> 1; default -> 5; };
+                stored = v >= 0 && v <= max ? v : null;
             }
             case "facing" -> stored = EDITABLE.get("facing").contains(value) ? value : null;
             case "width", "height" -> {
@@ -623,13 +669,15 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             default -> stored = value.equals("none") ? "none" : value.equals("wall") ? "wall" : null;
         }
         if (stored == null) { sender.sendMessage(error("edit.invalid", raw, key, String.join(", ", EDITABLE.get(key)))); return; }
+        boolean view = VIEW_KEYS.contains(key);
         if (key.equals("frame") && stored.equals("wall")) getConfig().set(path + ".frame", null);   // default wall
+        else if (view) getConfig().set(path + ".view." + key, "none".equals(stored) ? null : stored);
         else getConfig().set(path + "." + key, stored);
         saveConfig();
         load();
         sender.sendMessage(text("edit.done", args[1], key, String.valueOf(stored)));
         // the views through both portals are baked with the portal's size and direction
-        if (key.equals("facing") || key.equals("width") || key.equals("height")) sender.sendMessage(text("edit.update"));
+        if (view || key.equals("facing") || key.equals("width") || key.equals("height")) sender.sendMessage(text("edit.update"));
     }
 
     @Override public List<String> onTabComplete(CommandSender sender, Command cmd, String label, String[] args) {

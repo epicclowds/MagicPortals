@@ -17,7 +17,8 @@ import org.bukkit.configuration.ConfigurationSection;
  */
 public interface Exchange extends AutoCloseable {
     long HEARTBEAT_VALID = 16_000, ARRIVAL_VALID = 30_000;
-    String FRONT = "front", BACK = "back";
+    /** Snapshot kinds; "view" holds the view settings (time, fog, …) of the portal that shows the scene. */
+    String FRONT = "front", BACK = "back", VIEW = "view";
 
     void heartbeat(String server) throws IOException;
     void signOff(String server) throws IOException;

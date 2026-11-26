@@ -115,6 +115,30 @@ Change a portal's look at any time with `/mp edit <server> style <name>` (or `/m
 
 Sounds are off by default (`sound: false`). The lightning strikes of `storm` are only particles, a short flash of light (client-side) and – with sound on – thunder for nearby players; they do no damage, start no fires and are not heard across the whole world like real lightning.
 
+## View
+
+The `view` section of a portal changes how the destination looks **through this portal** – it is baked into the scene, so run `/mp update` after changing it. All keys are optional and can also be set with `/mp edit <server> <key> <value>`.
+
+```yaml
+portals:
+  lobby:
+    view:
+      time: night          # day, sunset, night
+      fog: 2               # 0 = none, 1 = normal, up to 8 = very dense
+      fog-color: "#3060ff" # hex or a name (blue, red, green, purple, orange, white, …); none = sky colour
+      tint: "#ff4020"      # colour filter over the whole view; none = off
+      tint-strength: 0.5   # 0 – 1
+      weather: snow        # none, rain, snow, ash, embers
+```
+
+| Key | Default | Effect |
+|---|---|---|
+| `time` | `day` | `sunset`: orange sky and warm light. `night`: dark blue sky with stars; torches, lanterns, lava and other light sources glow (block light is baked into the scene). |
+| `fog` | `1` | Fog density. Higher values let the destination fade out after a few blocks. |
+| `fog-color` | sky | Colour of the fog and the sky behind it – blue, red, green fog … |
+| `tint` / `tint-strength` | off / `0.5` | Colour filter over the view. |
+| `weather` | `none` | Animated particles in the destination with real depth: `rain`, `snow`, `ash` (grey flakes, Nether), `embers` (rising sparks). |
+
 ## `resource-pack`
 
 Enable this on **exactly one** server.

@@ -53,7 +53,12 @@ public final class SceneBaker {
             var baker = new SceneBaker(jar, log);
             List<int[]> scenes = new ArrayList<>();
             for (String key : keys) scenes.add(baker.readScene(input.resolve(key + ".front")));
-            baker.write(scenes, output);
+            List<double[]> views = new ArrayList<>();
+            for (String key : keys) {
+                Path view = input.resolve(key + ".view");
+                views.add(viewParameters(Files.exists(view) ? Files.readString(view) : ""));
+            }
+            baker.write(scenes, views, output);
         }
         log.accept("Scenes: " + String.join(", ", keys));
         var numbers = new LinkedHashMap<String, Integer>();
@@ -85,6 +90,7 @@ public final class SceneBaker {
         double[] min = {0, 0, 0}, max = {1, 1, 1};
         int[] tile = new int[6];         // faces: up, down, north, south, east, west
         int tint = 0xFFFFFF, tintMask;
+        int emission;                    // light the block gives off (torches, lanterns, lava …)
         static Shape air() { return new Shape(); }
     }
 
@@ -106,6 +112,7 @@ public final class SceneBaker {
         try { shape = resolve(state); }
         catch (RuntimeException e) { log.accept("  ! " + state + ": " + e.getMessage()); shape = Shape.air(); }
         if (shape.kind == 0) { palette.put(state, 0); return 0; }
+        shape.emission = emission(state);
         palette.put(state, shapes.size());
         shapes.add(shape);
         return shapes.size() - 1;
@@ -366,6 +373,85 @@ public final class SceneBaker {
         }
     }
 
+    /** Light level a block state gives off. */
+    private static int emission(String state) {
+        try { return org.bukkit.Bukkit.createBlockData(state).getLightEmission(); }
+        catch (Throwable e) {
+            // without a server (tools): the most common light sources
+            String s = stripNamespace(state);
+            if (s.contains("lit=false")) return 0;
+            if (s.startsWith("glowstone") || s.startsWith("sea_lantern") || s.startsWith("lava") || s.startsWith("jack_o_lantern")
+                    || s.startsWith("shroomlight") || s.startsWith("beacon") || s.endsWith("froglight") || s.startsWith("lantern")
+                    || s.startsWith("campfire") || s.startsWith("redstone_lamp")) return 15;
+            if (s.startsWith("torch") || s.startsWith("wall_torch") || s.startsWith("end_rod")) return 14;
+            if (s.startsWith("soul_")) return 10;
+            return 0;
+        }
+    }
+
+    /** Block light like Minecraft: the emission of light sources, -1 per block, blocked by opaque blocks. */
+    private int[] blockLight(int[] voxels) {
+        int[] light = new int[voxels.length];
+        var queue = new ArrayDeque<Integer>();
+        for (int idx = 0; idx < voxels.length; idx++) {
+            int e = shapes.get(voxels[idx]).emission;
+            if (e > 0) { light[idx] = e; queue.add(idx); }
+        }
+        int[][] neighbours = {{1, 0, 0}, {-1, 0, 0}, {0, 1, 0}, {0, -1, 0}, {0, 0, 1}, {0, 0, -1}};
+        while (!queue.isEmpty()) {
+            int idx = queue.poll();
+            int i = idx % W, j = (idx / W) % H, k = idx / (W * H);
+            for (int[] n : neighbours) {
+                int ni = i + n[0], nj = j + n[1], nk = k + n[2];
+                if (ni < 0 || nj < 0 || nk < 0 || ni >= W || nj >= H || nk >= DT) continue;
+                int nIdx = (nk * H + nj) * W + ni;
+                if (shapes.get(voxels[nIdx]).opaque) continue;
+                if (light[nIdx] < light[idx] - 1) { light[nIdx] = light[idx] - 1; queue.add(nIdx); }
+            }
+        }
+        return light;
+    }
+
+    /**
+     * View settings of the portal showing a scene ("time=night;fog=2;fog-color=#3050ff;tint=…;tint-strength=0.5;weather=snow")
+     * as 12 numbers: time, fog, weather, tint strength | tint rgb, custom fog | fog rgb, 0.
+     */
+    static double[] viewParameters(String text) {
+        var p = new HashMap<String, String>();
+        for (String part : text.split(";")) {
+            int eq = part.indexOf('=');
+            if (eq > 0) p.put(part.substring(0, eq).trim().toLowerCase(Locale.ROOT), part.substring(eq + 1).trim().toLowerCase(Locale.ROOT));
+        }
+        double time = switch (p.getOrDefault("time", "day")) { case "sunset", "dusk", "abend" -> 1; case "night", "nacht" -> 2; default -> 0; };
+        double weather = switch (p.getOrDefault("weather", "none")) { case "rain", "regen" -> 1; case "snow", "schnee" -> 2; case "ash", "asche" -> 3; case "embers", "glut" -> 4; default -> 0; };
+        double fog = number(p.get("fog"), 1, 0, 8);
+        double[] tint = rgb(p.get("tint")), fogColor = rgb(p.get("fog-color"));
+        double strength = tint == null ? 0 : number(p.get("tint-strength"), .5, 0, 1);
+        if (tint == null) tint = new double[]{1, 1, 1};
+        return new double[]{time, fog, weather, strength, tint[0], tint[1], tint[2], fogColor == null ? 0 : 1,
+                fogColor == null ? 0 : fogColor[0], fogColor == null ? 0 : fogColor[1], fogColor == null ? 0 : fogColor[2], 0};
+    }
+
+    /** The view parameters of all scenes as GLSL vec4 list. */
+    private static String viewArray(List<double[]> views) {
+        var parts = new ArrayList<String>();
+        for (double[] v : views)
+            for (int i = 0; i < 12; i += 4)
+                parts.add(String.format(Locale.ROOT, "vec4(%.4f, %.4f, %.4f, %.4f)", v[i], v[i + 1], v[i + 2], v[i + 3]));
+        return String.join(", ", parts);
+    }
+
+    private static double number(String text, double fallback, double min, double max) {
+        try { return text == null ? fallback : Math.max(min, Math.min(max, Double.parseDouble(text))); }
+        catch (NumberFormatException e) { return fallback; }
+    }
+
+    private static double[] rgb(String text) {
+        if (text == null || !text.matches("#?[0-9a-f]{6}")) return null;
+        int c = Integer.parseInt(text.replace("#", ""), 16);
+        return new double[]{(c >> 16 & 255) / 255.0, (c >> 8 & 255) / 255.0, (c & 255) / 255.0};
+    }
+
     /** Sky light like Minecraft: 15 from above, 0 through opaque blocks, -1 per block sideways. */
     private int[] skyLight(int[] voxels) {
         int[] light = new int[voxels.length];
@@ -396,18 +482,18 @@ public final class SceneBaker {
         return light;
     }
 
-    private void write(List<int[]> scenes, Path output) throws IOException {
+    private void write(List<int[]> scenes, List<double[]> views, Path output) throws IOException {
         int count = scenes.size();
-        // voxel texture: R,G = palette id, B = sky light (bits 0-3) + "water above" flag (bit 4)
+        // voxel texture: R,G = palette id, B = sky light (bits 0-3) + "water above" flag (bit 4) + block light / 2 (bits 5-7)
         BufferedImage voxelImage = new BufferedImage(W * 8, DT * HB * count, BufferedImage.TYPE_INT_ARGB);
         for (int s = 0; s < count; s++) {
             int[] voxels = scenes.get(s);
-            int[] light = skyLight(voxels);
+            int[] light = skyLight(voxels), blockLight = blockLight(voxels);
             for (int k = 0; k < DT; k++) for (int j = 0; j < H; j++) for (int i = 0; i < W; i++) {
                 int idx = (k * H + j) * W + i;
                 int id = voxels[idx];
                 boolean waterAbove = shapes.get(id).fluid && j + 1 < H && shapes.get(voxels[idx + W]).fluid;
-                int b = (light[idx] & 15) | (waterAbove ? 16 : 0);
+                int b = (light[idx] & 15) | (waterAbove ? 16 : 0) | (Math.min(7, (blockLight[idx] + 1) / 2) << 5);
                 int px = i + (j % 8) * W, py = k + (j / 8) * DT + s * DT * HB;
                 voxelImage.setRGB(px, py, 0xFF000000 | ((id & 255) << 16) | (((id >> 8) & 255) << 8) | b);
             }
@@ -456,8 +542,10 @@ public final class SceneBaker {
                 #define DP_ATLAS_COLUMNS %d
                 #define DP_HORIZON vec3(0.75, 0.85, 1.0)
                 #define DP_ZENITH vec3(0.47, 0.65, 1.0)
+                // per scene: (time, fog, weather, tint strength), (tint rgb, custom fog), (fog rgb, 0)
+                const vec4 DP_VIEW[%d] = vec4[](%s);
                 #endif
-                """.formatted(W, H, D, DB, DT, HB, RX0, GY0, count, ATLAS_COLUMNS));
+                """.formatted(W, H, D, DB, DT, HB, RX0, GY0, count, ATLAS_COLUMNS, count * 3, viewArray(views)));
 
         Path post = output.resolve("assets/minecraft/post_effect");
         Files.createDirectories(post);

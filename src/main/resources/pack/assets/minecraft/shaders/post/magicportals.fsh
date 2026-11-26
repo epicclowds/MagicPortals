@@ -75,19 +75,77 @@ float faceShade(int f) {
     return 0.6;
 }
 
-float lightFactor(int level) {
-    return mix(0.18, 1.0, pow(0.82, float(15 - level)));
+// ---------- view settings of the portal (time, fog, tint, weather), from DP_VIEW ----------
+
+int VIEW_TIME = 0;                    // 0 day, 1 sunset, 2 night
+float VIEW_FOG = 1.0;                 // fog density, 0 = none
+bool VIEW_FOG_CUSTOM = false;
+vec3 VIEW_FOG_COLOR = vec3(0.0);
+vec3 VIEW_TINT = vec3(1.0);
+float VIEW_TINT_STRENGTH = 0.0;
+int VIEW_WEATHER = 0;                 // 0 none, 1 rain, 2 snow, 3 ash, 4 embers
+float SKY_SCALE = 1.0;                // how much sky light there is
+vec3 SKY_LIGHT_COLOR = vec3(1.0);
+vec3 SKY_HORIZON = DP_HORIZON, SKY_ZENITH = DP_ZENITH;
+
+void setView(int scene) {
+    vec4 a = DP_VIEW[scene * 3], b = DP_VIEW[scene * 3 + 1], c = DP_VIEW[scene * 3 + 2];
+    VIEW_TIME = int(a.x + 0.5);
+    VIEW_FOG = a.y;
+    VIEW_WEATHER = int(a.z + 0.5);
+    VIEW_TINT_STRENGTH = a.w;
+    VIEW_TINT = b.rgb;
+    VIEW_FOG_CUSTOM = b.a > 0.5;
+    VIEW_FOG_COLOR = c.rgb;
+    if (VIEW_TIME == 1) {
+        SKY_HORIZON = vec3(1.0, 0.55, 0.3); SKY_ZENITH = vec3(0.32, 0.33, 0.62);
+        SKY_SCALE = 0.8; SKY_LIGHT_COLOR = vec3(1.0, 0.78, 0.6);
+    } else if (VIEW_TIME == 2) {
+        SKY_HORIZON = vec3(0.05, 0.07, 0.15); SKY_ZENITH = vec3(0.01, 0.015, 0.045);
+        SKY_SCALE = 0.3; SKY_LIGHT_COLOR = vec3(0.55, 0.65, 1.0);
+    }
+}
+
+float lightFactor(float level) {
+    return mix(0.18, 1.0, pow(0.82, 15.0 - level));
+}
+
+// Light of a voxel: sky light (bits 0-3, scaled by the time of day) or block light (bits 5-7) of torches etc.
+vec3 lightOf(int raw) {
+    float skyLevel = float(raw & 15) * SKY_SCALE;
+    int b = (raw >> 5) & 7;
+    float blockLevel = b > 0 ? float(b) * 2.0 + 1.0 : 0.0;
+    float level = max(skyLevel, blockLevel);
+    vec3 color = mix(SKY_LIGHT_COLOR, vec3(1.0, 0.86, 0.66), clamp((blockLevel - skyLevel) / 4.0, 0.0, 1.0));
+    return color * lightFactor(level);
 }
 
 vec3 sky(vec3 d) {
-    return mix(DP_HORIZON, DP_ZENITH, smoothstep(-0.05, 0.55, d.y));
+    vec3 c = mix(SKY_HORIZON, SKY_ZENITH, smoothstep(-0.05, 0.55, d.y));
+    if (VIEW_TIME == 1) c += vec3(1.0, 0.45, 0.15) * pow(max(0.0, 1.0 - abs(d.y - 0.03) * 5.0), 3.0) * 0.4;   // glowing horizon
+    if (VIEW_TIME == 2 && d.y > 0.0) {
+        // stars
+        vec3 n = normalize(d) * 180.0;
+        vec3 cell = floor(n);
+        float h = fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
+        c += vec3(0.9, 0.92, 1.0) * step(0.985, h) * smoothstep(0.5, 0.1, length(fract(n) - 0.5)) * smoothstep(0.0, 0.2, d.y);
+    }
+    if (VIEW_FOG_CUSTOM) c = mix(c, VIEW_FOG_COLOR, clamp(0.35 + 0.15 * VIEW_FOG, 0.0, 1.0));
+    return c;
+}
+
+vec3 fogColor(vec3 d) {
+    return VIEW_FOG_CUSTOM ? VIEW_FOG_COLOR * (VIEW_TIME == 2 ? 0.45 : 1.0) : sky(d);
 }
 
 // Fog towards the horizon. Backwards (+z) the scene only reaches DP_DB blocks,
-// so the fog starts earlier there to hide the edge.
+// so the fog starts earlier there to hide the edge. Denser fog starts closer.
 float fog(float dist, vec3 d) {
     float fogEnd = d.z > 0.0 ? mix(float(DP_D) * 0.97, float(DP_DB) * 0.95, smoothstep(0.0, 0.5, d.z)) : float(DP_D) * 0.97;
-    return smoothstep(fogEnd * 0.5, fogEnd, dist);
+    float density = max(VIEW_FOG, 0.0);
+    if (density < 0.01) return smoothstep(fogEnd * 0.9, fogEnd, dist);   // only hide the edge of the scene
+    float end = min(fogEnd, fogEnd / density);
+    return smoothstep(end * (density > 1.0 ? 0.05 : 0.5), end, dist);
 }
 
 bool inOpening(vec2 p) {
@@ -110,7 +168,10 @@ vec2 boxHit(vec3 o, vec3 d, vec3 lo, vec3 hi) {
 
 /* Marches a ray from start (local, z < 0) through the voxel scene (DDA). The scene also extends in
  * front of the plane, so the in-between space shows the destination world all around. */
+float MARCH_T = 1e4;   // distance of the last hit along the ray (for weather)
+
 vec3 march(vec3 start, vec3 d, int scene) {
+    MARCH_T = 1e4;
     vec3 o0 = start;
     ivec3 cell = ivec3(floor(o0));
     cell.z = min(cell.z, -1);
@@ -129,7 +190,7 @@ vec3 march(vec3 start, vec3 d, int scene) {
         ivec4 v = voxel(cell, scene);
         if (v.x < 0) break;
         int entry = v.x;
-        int lightLevel = v.y & 15;
+        int lightLevel = v.y;   // sky light, water flag and block light, see lightOf
         bool fluidHere = false;
         vec3 local = o0 + d * tRay - vec3(cell);
 
@@ -153,13 +214,14 @@ vec3 march(vec3 start, vec3 d, int scene) {
                     if (tex.a > 0.5) {
                         vec3 c = tex.rgb;
                         if (((tintMask >> f) & 1) != 0) c *= tint;
-                        c *= faceShade(f) * lightFactor(f == 0 || fluid ? max(lightLevel, prevLight) : prevLight);
+                        c *= faceShade(f) * (f == 0 || fluid ? max(lightOf(lightLevel), lightOf(prevLight)) : lightOf(prevLight));
                         float haze = fog(tRay + q.x, d);
-                        c = mix(c, sky(d), haze);
+                        c = mix(c, fogColor(d), haze);
                         if (fluid) {
                             color += rest * 0.62 * c;
                             rest *= 0.38;
                         } else {
+                            MARCH_T = tRay + q.x;
                             return color + rest * c;
                         }
                     }
@@ -181,11 +243,12 @@ vec3 march(vec3 start, vec3 d, int scene) {
                     if (tex.a < 0.5) continue;
                     vec3 c = tex.rgb;
                     if ((tintMask & 1) != 0) c *= tint;
-                    bestT = t; bestC = c * 0.85 * lightFactor(lightLevel);
+                    bestT = t; bestC = c * 0.85 * lightOf(lightLevel);
                 }
                 if (bestT < 1e8) {
                     float haze = fog(tRay + bestT, d);
-                    return color + rest * mix(bestC, sky(d), haze);
+                    MARCH_T = tRay + bestT;
+                    return color + rest * mix(bestC, fogColor(d), haze);
                 }
             }
         }
@@ -197,6 +260,61 @@ vec3 march(vec3 start, vec3 d, int scene) {
         else { tRay = tMax.z; tMax.z += tDelta.z; cell.z += stepDir.z; }
     }
     return color + rest * sky(d);
+}
+
+float weatherHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+
+// Snow, rain, ash or embers in the destination world: particles on a few layers behind the opening
+// (true parallax), hidden behind blocks that are closer than the layer.
+vec3 weather(vec3 c, vec3 start, vec3 d, float time) {
+    if (VIEW_WEATHER == 0 || d.z > -0.05) return c;
+    float night = VIEW_TIME == 2 ? 0.45 : 1.0;
+    for (int layer = 0; layer < 6; layer++) {
+        float fl = float(layer);
+        float depth = 1.5 + fl * 2.3;
+        float t = (-depth - start.z) / d.z;
+        if (t < 0.0 || t > MARCH_T) continue;
+        vec2 uv = (start + d * t).xy;
+        float fade = 1.0 - fl * 0.11;
+        if (VIEW_WEATHER == 1) {
+            // rain: thin fast streaks
+            vec2 q = vec2(uv.x * 3.0 + fl * 7.3, uv.y * 0.7 + time * 6.5 + fl * 3.1);
+            vec2 cell = floor(q), f = fract(q);
+            float h = weatherHash(cell);
+            if (h < 0.45) continue;
+            float x = 0.15 + 0.7 * fract(h * 13.7);
+            float streak = smoothstep(0.045, 0.0, abs(f.x - x)) * smoothstep(0.0, 0.2, f.y) * smoothstep(0.7, 0.45, f.y);
+            c = mix(c, vec3(0.72, 0.77, 0.88) * night, streak * 0.45 * fade);
+            continue;
+        }
+        bool embers = VIEW_WEATHER == 4, ash = VIEW_WEATHER == 3;
+        float speed = embers ? -0.7 : ash ? 0.45 : 1.1;
+        float sway = (ash ? 0.5 : 0.3) * sin(time * (ash ? 0.5 : 0.8) + uv.y * 0.6 + fl * 1.7);
+        vec2 q = vec2(uv.x + sway, uv.y + time * speed) * 2.2 + vec2(fl * 17.3, fl * 5.9);
+        vec2 cell = floor(q), f = fract(q);
+        float h = weatherHash(cell);
+        if (h < (embers ? 0.72 : 0.38)) continue;
+        vec2 centre = 0.2 + 0.6 * vec2(fract(h * 7.31), fract(h * 3.17));
+        float radius = (embers ? 0.05 : 0.07) + 0.05 * fract(h * 11.1);
+        float flake = smoothstep(radius, radius * 0.35, length(f - centre)) * fade;
+        if (embers) c += vec3(1.0, 0.45, 0.08) * flake * (0.7 + 0.5 * sin(time * 6.0 + h * 40.0)) * 1.5;
+        else if (ash) c = mix(c, vec3(0.42, 0.4, 0.4) * mix(1.0, 1.5, fract(h * 5.0)) * night, flake * 0.85);
+        else c = mix(c, vec3(0.95, 0.97, 1.0) * night, flake * 0.9);
+    }
+    return c;
+}
+
+// The destination as seen through this portal: scene, weather, colour filter.
+vec3 viewMarch(vec3 start, vec3 d, int scene, float time) {
+    vec3 c = march(start, d, scene);
+    c = weather(c, start, d, time);
+    if (VIEW_WEATHER == 1) c *= 0.85;   // overcast
+    if (VIEW_TINT_STRENGTH > 0.0) {
+        float luminance = dot(c, vec3(0.3, 0.59, 0.11));
+        vec3 tinted = luminance * VIEW_TINT / max(dot(VIEW_TINT, vec3(0.3, 0.59, 0.11)), 0.1);
+        c = mix(c, min(tinted, vec3(1.5)), VIEW_TINT_STRENGTH);
+    }
+    return c;
 }
 
 // ---------- style "rift": torn dimensional crack with an electric edge ----------
@@ -610,6 +728,7 @@ void main() {
     FLAME_HEIGHT = OPENING_H * 1.55;
     ICE_HEIGHT = OPENING_H * 1.6;
     if (scene < 0 || scene >= DP_SCENES) return;
+    setView(scene);
 
     // The eye is the point the projection maps to w = 0. View bobbing lives in the projection
     // and shifts the eye; this way rays stay correct whatever depth range
@@ -644,7 +763,7 @@ void main() {
         vec3 hit = eye + d * tPlane;
         if (!inOpening(hit.xy)) return;
         if (sceneDist < tPlane - 0.03) return;
-        vec3 color = march(hit + d * 1e-3, d, scene);
+        vec3 color = viewMarch(hit + d * 1e-3, d, scene, time);
         float edge = min(min(hit.x, OPENING_W - hit.x), min(hit.y, OPENING_H - hit.y));
         color += vec3(0.35, 0.85, 1.0) * exp(-edge * 22.0) * 0.55;
         fragColor = vec4(color, 1.0);
@@ -657,7 +776,7 @@ void main() {
         float angle;
         float edgeDist = riftDistance(hit.xy, time, angle);
         if (edgeDist > 1.2) return;
-        vec3 color = edgeDist < 0.0 ? march(hit + d * 1e-3, d, scene) : base.rgb * riftHem(edgeDist, angle);
+        vec3 color = edgeDist < 0.0 ? viewMarch(hit + d * 1e-3, d, scene, time) : base.rgb * riftHem(edgeDist, angle);
         if (edgeDist < 0.0) color *= mix(1.0, 0.55, exp(edgeDist * 9.0));          // darker rim inside
         fragColor = vec4(color + riftGlow(hit.xy, edgeDist, angle, time), 1.0);
     } else if (eye.z > 0.0 && style >= 2) {
@@ -685,14 +804,14 @@ void main() {
                 // the ice crystal refracts the view a little towards its edges
                 start.xy += vec2(hit.x - OPENING_W * 0.5, 0.0) * 0.12 * exp(e * 2.0);
             }
-            color = styleInside(style, march(start + d * 1e-3, d, scene), hit.xy, e, time);
+            color = styleInside(style, viewMarch(start + d * 1e-3, d, scene, time), hit.xy, e, time);
         } else color = styleOutside(style, hit.xy, e, angle, time, base.rgb);
         fragColor = vec4(color + styleGlow(style, hit.xy, e, angle, time), 1.0);
     } else if (insideView && eye.z > -INSIDE_DEPTH && eye.z <= 0.0 && inOpening(eye.xy)) {
         // The camera flew through the opening: the whole screen shows the destination world in all
         // directions, without the portal, as if you had really walked through. In game there are
         // barriers there, so normal players never get here.
-        fragColor = vec4(march(eye, d, scene), 1.0);
+        fragColor = vec4(viewMarch(eye, d, scene, time), 1.0);
     } else if (eye.z <= 0.0 && style == 1) {
         // rift seen from behind: glowing edge around a dark starry nebula
         if (d.z <= 1e-4) return;
