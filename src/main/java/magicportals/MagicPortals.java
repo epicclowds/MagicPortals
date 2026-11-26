@@ -489,6 +489,8 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             meta.displayName(Component.text("Portal Wand", NamedTextColor.LIGHT_PURPLE).decoration(net.kyori.adventure.text.format.TextDecoration.ITALIC, false));
             meta.lore(List.of(Component.text(messages.get("wand.lore1"), NamedTextColor.GRAY), Component.text(messages.get("wand.lore2"), NamedTextColor.GRAY)));
             meta.setEnchantmentGlintOverride(true);
+            // own model from the MagicPortals resource pack (a staff with a glowing crystal); off: plain golden pickaxe
+            if (getConfig().getBoolean("wand-model", true)) meta.setItemModel(new org.bukkit.NamespacedKey("magicportals", "wand"));
             meta.setUnbreakable(true);
             meta.getPersistentDataContainer().set(wandKey(), org.bukkit.persistence.PersistentDataType.BYTE, (byte) 1);
         });

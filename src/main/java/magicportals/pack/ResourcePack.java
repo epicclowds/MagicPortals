@@ -44,6 +44,12 @@ public final class ResourcePack {
             "assets/minecraft/shaders/post/magicportals.fsh",
             "assets/minecraft/shaders/post/magicportals_scrub.fsh",
             "assets/minecraft/shaders/post/magicportals_blur.fsh");
+    /** Further pack files, copied as they are: the Portal Wand item. */
+    private static final List<String> ASSETS = List.of(
+            "assets/magicportals/items/wand.json",
+            "assets/magicportals/models/item/wand.json",
+            "assets/magicportals/textures/item/wand.png",
+            "assets/magicportals/textures/item/wand.png.mcmeta");
 
     private final JavaPlugin plugin;
     private HttpServer webServer;
@@ -123,6 +129,14 @@ public final class ResourcePack {
             Path target = baked.resolve(file);
             Files.createDirectories(target.getParent());
             Files.writeString(target, text, StandardCharsets.UTF_8);
+        }
+        for (String file : ASSETS) {
+            try (var in = plugin.getResource("pack/" + file)) {
+                if (in == null) throw new IOException("Missing file in plugin jar: " + file);
+                Path target = baked.resolve(file);
+                Files.createDirectories(target.getParent());
+                Files.write(target, in.readAllBytes());
+            }
         }
         bundleSounds(baked);
         Path zip = plugin.getDataFolder().toPath().resolve("MagicPortals-pack.zip");

@@ -29,6 +29,10 @@ exchange:
 # the server sends real blocks of the destination behind the portal. Off by default.
 fallback-blocks: false
 
+# The Portal Wand (/mp wand) uses its own model from the MagicPortals pack. false = plain golden pickaxe
+# (e.g. if the pack is not delivered on every server).
+wand-model: true
+
 # Portals on this server. Key = target server (name from velocity.toml).
 # Easiest way to add one in game: /magicportals set <target server> [display name]
 # If x/y/z are missing, MagicPortals picks a flat spot near the world spawn.

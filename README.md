@@ -105,7 +105,7 @@ Until the counterpart exists, walking through takes you to the target server's s
 ### Your own frame, any size – the Portal Wand
 
 1. Build your frame with an empty opening, in any of the four directions. Any rectangle up to 7×7 blocks.
-2. `/mp wand` gives you the Portal Wand (a glowing golden pickaxe).
+2. `/mp wand` gives you the Portal Wand – a staff with a glowing crystal (its own model from the MagicPortals pack).
 3. **Left-click** the block in one corner of the opening, **right-click** the opposite corner. A particle outline shows the marked area.
 4. Stand **on the side players should walk in from** and run `/mp set survival Survival` – the portal fills exactly that opening and faces you. No wall and no barriers are placed (`frame: none`), your build stays as it is.
 5. `/mp update` on the resource-pack server.
@@ -144,7 +144,7 @@ All commands need `magicportals.admin` (default: op). Aliases: `/mp`, `/magicpor
 ```
 The plugin jar ends up in `build/libs/`. Java 25 is required (Gradle downloads a toolchain if needed).
 
-The `tools/` folder contains helpers for development: `ShaderCheck` compiles the portal shaders offline with shaderc (same compiler as the client), `ScenePreview` renders a baked scene on the CPU, `LogoRender` draws the logo.
+The `tools/` folder contains helpers for development: `ShaderCheck` compiles the portal shaders offline with shaderc (same compiler as the client), `ScenePreview` renders a baked scene on the CPU, `LogoRender` draws the logo, `WandTexture` the animated Portal Wand texture.
 
 ## License
 

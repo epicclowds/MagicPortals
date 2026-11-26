@@ -50,6 +50,7 @@ resource-pack:
 | `server` | – | **Required.** Name of this server exactly as listed under `[servers]` in `velocity.toml`. |
 | `language` | `en` | Language of in-game messages: `en` or `de`. |
 | `fallback-blocks` | `false` | For players without the resource pack (or with Iris/OptiFine shader packs): the server sends the destination's blocks behind the portal as client-side blocks. Costs bandwidth; leave off if everyone uses the pack. |
+| `wand-model` | `true` | The Portal Wand (`/mp wand`) uses its own animated model from the MagicPortals pack – a staff with a glowing violet-cyan crystal. Works with Oraxen, ItemsAdder and the built-in web server, no extra plugin needed. `false`: plain golden pickaxe, e.g. if a server does not get the pack. |
 
 ## `exchange`
 
