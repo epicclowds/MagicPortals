@@ -34,6 +34,8 @@ public final class Portal {
     public final boolean rift;         // any free-standing style (everything except gate): no wall
     public final boolean sound;        // ambient sounds (opt-in)
     public final float volume;         // their volume, 1 = normal
+    public final double particleAmount; // particle multiplier, 1 = normal
+    public final boolean effects;      // special effects on nearby players (fire, frost, darkness, …)
     public final boolean insideView;   // cameras can fly "into" the destination behind the opening
     public final boolean barriers;     // with insideView: invisible barriers keep players out of the space behind
     public final boolean showLabel;    // floating name above the portal
@@ -71,11 +73,12 @@ public final class Portal {
 
     public Portal(Plugin plugin, World world, String target, String name, int x, int y, int z, Facing facing, int width, int height,
                   Material outer, Material inner, Style style, boolean insideView, boolean barriers, boolean showLabel,
-                  boolean sound, float volume, String offlineLabel) {
+                  boolean sound, float volume, double particleAmount, boolean effects, String offlineLabel) {
         this.plugin = plugin; this.world = world; this.target = target; this.name = name;
         this.x = x; this.y = y; this.z = z; this.facing = facing;
         this.outer = outer; this.inner = inner; this.style = style; this.rift = style != Style.GATE; this.insideView = insideView;
-        this.sound = sound; this.volume = Math.max(0f, volume); this.barriers = barriers; this.showLabel = showLabel;
+        this.sound = sound; this.volume = Math.max(0f, volume);
+        this.particleAmount = Math.max(0, Math.min(5, particleAmount)); this.effects = effects; this.barriers = barriers; this.showLabel = showLabel;
         this.width = Math.max(1, Math.min(MAX_SIZE, width));
         this.height = Math.max(1, Math.min(MAX_SIZE, height));
         this.anchor = (this.width - 1) / 2;
@@ -194,6 +197,7 @@ public final class Portal {
     }
 
     public void tearDown() {
+        clearEffects();
         for (Player p : world.getPlayers()) { var v = views.get(p.getUniqueId()); if (v != null) reset(p, v); }
         views.clear();
         for (var e : decoration) e.remove();
@@ -389,18 +393,21 @@ public final class Portal {
         var random = ThreadLocalRandom.current();
         double w = width, h = height;
         if (style == Style.INFERNO) {
-            // pointed arch: straight sides, elliptic top
-            double r = Math.min(w * .5, h * .45), top = h - r;
-            if (random.nextDouble() < top / (top + r * 1.6)) {
-                boolean left = random.nextBoolean();
-                return at(left ? -outside : w + outside, random.nextDouble() * top, .02);
-            }
-            double t = random.nextDouble() * Math.PI;
-            return at(w / 2 + Math.cos(t) * (w / 2 + outside), top + Math.sin(t) * (r + outside), .02);
+            // outline of the main flame (as in the shader, without swaying)
+            double t = random.nextDouble(), fh = h * 1.55;
+            double profile = t < .3 ? .78 + .22 * Math.sqrt(Math.max(0, 1 - Math.pow((.3 - t) / .3, 2))) : Math.pow(1 - (t - .3) / .7, 1.4);
+            double half = w * .5 * profile + outside;
+            return at(w / 2 + (random.nextBoolean() ? half : -half), -.1 + t * fh, .02);
         }
-        double ry = h / 2 + (style == Style.STORM ? .1 : style == Style.FROST ? .05 : 0);
+        if (style == Style.FROST) {
+            // outline of the ice crystal: two sides, two roof edges
+            double cw = w * .5 * 1.08, cx = w / 2, ch = h * 1.6, s = random.nextBoolean() ? 1 : -1, t = random.nextDouble();
+            if (random.nextDouble() < .55) return at(cx + s * (cw + (cw * .9 - cw) * t + outside), -.2 + (ch * .62 + .2) * t, .02);
+            return at(cx + s * (cw * .9 * (1 - t) + outside), ch * .62 + ch * .38 * t + outside * .5, .02);
+        }
+        double rx = style == Style.STORM ? Math.min(w, h) / 2 : w / 2, ry = style == Style.STORM ? rx : h / 2;
         double t = random.nextDouble() * 2 * Math.PI;
-        return at(w / 2 + Math.cos(t) * (w / 2 + outside), h / 2 + Math.sin(t) * (ry + outside), .02);
+        return at(w / 2 + Math.cos(t) * (rx + outside), h / 2 + Math.sin(t) * (ry + outside), .02);
     }
 
     /** Plays an ambient sound if sounds are enabled for this portal, scaled by its volume. */
@@ -421,6 +428,58 @@ public final class Portal {
             case VOID -> voidParticles();
             case FROST -> frostParticles();
         }
+        if (effects) playerEffects();
+    }
+
+    /** Number of particles for a base amount, scaled by the particle option (randomly rounded). */
+    private int n(int base) {
+        double v = base * particleAmount;
+        int whole = (int) v;
+        return whole + (ThreadLocalRandom.current().nextDouble() < v - whole ? 1 : 0);
+    }
+
+    private final Set<UUID> burning = new HashSet<>();
+    private final Map<UUID, Integer> darkened = new HashMap<>();
+
+    /**
+     * Special effects on players close to the portal (option "effects"): inferno sets them visually on
+     * fire, frost freezes the screen like powder snow (never long enough to hurt), void pulls a darkness
+     * vignette over the screen. Storm shakes the camera of players next to a lightning strike (see strike).
+     */
+    private void playerEffects() {
+        Location centre = at(width / 2.0, height / 2.0, 0);
+        for (Player p : world.getPlayers()) {
+            double[] l = local(p.getLocation());
+            double distance = Math.sqrt(p.getLocation().distanceSquared(centre));
+            switch (style) {
+                case INFERNO -> {
+                    boolean close = l[2] > -1 && l[2] < 2.2 && l[0] > -1.2 && l[0] < width + 1.2 && l[1] > -1 && l[1] < height * 1.55;
+                    if (close && burning.add(p.getUniqueId())) p.setVisualFire(net.kyori.adventure.util.TriState.TRUE);
+                    else if (!close && burning.remove(p.getUniqueId())) p.setVisualFire(net.kyori.adventure.util.TriState.NOT_SET);
+                }
+                case FROST -> {
+                    if (distance > 4.5 || p.getGameMode() == GameMode.SPECTATOR) continue;
+                    // ticks thaw by 2 per tick on their own; this runs every 4 ticks
+                    int add = 8 + (int) Math.round(12 * (1 - distance / 4.5));
+                    p.setFreezeTicks(Math.min(p.getMaxFreezeTicks() - 20, p.getFreezeTicks() + add));
+                }
+                case VOID -> {
+                    if (distance > 5) continue;
+                    int last = darkened.getOrDefault(p.getUniqueId(), -100);
+                    if (ticks - last < 8) continue;   // every 32 ticks
+                    darkened.put(p.getUniqueId(), ticks);
+                    p.sendPotionEffectChange(p, new org.bukkit.potion.PotionEffect(org.bukkit.potion.PotionEffectType.DARKNESS, 50, 0, true, false, false));
+                }
+                default -> { }
+            }
+        }
+    }
+
+    /** Removes effects that would otherwise stay (visual fire). */
+    private void clearEffects() {
+        for (UUID id : burning) { Player p = Bukkit.getPlayer(id); if (p != null) p.setVisualFire(net.kyori.adventure.util.TriState.NOT_SET); }
+        burning.clear();
+        darkened.clear();
     }
 
     /** Players close enough to see and hear the portal's effects. */
@@ -439,9 +498,9 @@ public final class Portal {
         var random = ThreadLocalRandom.current();
         Location centre = at(width / 2.0, height / 2.0, 0);
         for (Player p : audience(centre, 32)) {
-            for (int i = 0; i < 5; i++) p.spawnParticle(Particle.FLAME, edge(random.nextDouble() * .15), 0, 0, 1, 0, .03 + random.nextDouble() * .05);
-            for (int i = 0; i < 2; i++) p.spawnParticle(Particle.SMALL_FLAME, edge(.1), 0, 0, 1, 0, .04);
-            for (int i = 0; i < 2; i++) p.spawnParticle(Particle.DUST, edge(random.nextDouble() * .6), 1, .1, .3, .1, 0, EMBERS[random.nextInt(EMBERS.length)]);
+            for (int i = 0, k = n(8); i < k; i++) p.spawnParticle(Particle.FLAME, edge(random.nextDouble() * .15), 0, 0, 1, 0, .03 + random.nextDouble() * .05);
+            for (int i = 0, k = n(2); i < k; i++) p.spawnParticle(Particle.SMALL_FLAME, edge(.1), 0, 0, 1, 0, .04);
+            for (int i = 0, k = n(2); i < k; i++) p.spawnParticle(Particle.DUST, edge(random.nextDouble() * .6), 1, .1, .3, .1, 0, EMBERS[random.nextInt(EMBERS.length)]);
             if (random.nextInt(4) == 0) p.spawnParticle(Particle.LAVA, edge(0), 1, 0, 0, 0, 0);
             if (random.nextInt(3) == 0) p.spawnParticle(Particle.LARGE_SMOKE, at(width / 2.0, height + .3, .1), 0, (random.nextDouble() - .5) * .1, 1, 0, .05);
             if (p.getLocation().distanceSquared(centre) > 256) continue;
@@ -464,8 +523,8 @@ public final class Portal {
         List<Player> players = audience(centre, 48);
         if (players.isEmpty()) return;
         for (Player p : players) {
-            for (int i = 0; i < 4; i++) p.spawnParticle(Particle.ELECTRIC_SPARK, edge(random.nextDouble() * .2), 2, .1, .1, .1, .08);
-            for (int i = 0; i < 3; i++) p.spawnParticle(Particle.DUST, edge(random.nextDouble() * .3), 1, .03, .03, .03, 0, STORM_DUST[random.nextInt(STORM_DUST.length)]);
+            for (int i = 0, k = n(4); i < k; i++) p.spawnParticle(Particle.ELECTRIC_SPARK, edge(random.nextDouble() * .2), 2, .1, .1, .1, .08);
+            for (int i = 0, k = n(3); i < k; i++) p.spawnParticle(Particle.DUST, edge(random.nextDouble() * .3), 1, .03, .03, .03, 0, STORM_DUST[random.nextInt(STORM_DUST.length)]);
             if (p.getLocation().distanceSquared(centre) > 400) continue;
             if (ticks % 25 == 0) sound(p, centre, "minecraft:block.beacon.ambient", .4f, .5f);
             if (random.nextInt(10) == 0) sound(p, centre, "minecraft:entity.lightning_bolt.impact", .12f, pitch(1.6f, 2f));
@@ -503,6 +562,7 @@ public final class Portal {
             if (light) p.sendBlockChange(lightSpot.getLocation(), lightData);
             sound(p, impact, "minecraft:entity.lightning_bolt.impact", 1.0f, pitch(.8f, 1.1f));
             sound(p, impact, "minecraft:entity.lightning_bolt.thunder", .5f, pitch(.8f, 1.2f));
+            if (effects && p.getLocation().distanceSquared(impact) < 36) p.sendHurtAnimation((float) random.nextDouble(0, 360));
         }
         if (light) Bukkit.getScheduler().runTaskLater(plugin, () -> {
             for (Player p : players) if (p.isOnline()) p.sendBlockChange(lightSpot.getLocation(), lightSpot.getBlockData());
@@ -519,9 +579,9 @@ public final class Portal {
         Location centre = at(width / 2.0, height / 2.0, 0);
         for (Player p : audience(centre, 32)) {
             // particles of the surroundings are sucked into the vortex
-            for (int i = 0; i < 3; i++) p.spawnParticle(Particle.PORTAL, edge(random.nextDouble() * .3), 2, .2, .2, .2, .6);
-            for (int i = 0; i < 2; i++) p.spawnParticle(Particle.REVERSE_PORTAL, edge(.8 + random.nextDouble()), 1, .2, .2, .2, .02);
-            for (int i = 0; i < 3; i++) p.spawnParticle(Particle.DUST, edge(random.nextDouble() * .25), 1, .03, .03, .03, 0, VOID_DUST[random.nextInt(VOID_DUST.length)]);
+            for (int i = 0, k = n(3); i < k; i++) p.spawnParticle(Particle.PORTAL, edge(random.nextDouble() * .3), 2, .2, .2, .2, .6);
+            for (int i = 0, k = n(2); i < k; i++) p.spawnParticle(Particle.REVERSE_PORTAL, edge(.8 + random.nextDouble()), 1, .2, .2, .2, .02);
+            for (int i = 0, k = n(3); i < k; i++) p.spawnParticle(Particle.DUST, edge(random.nextDouble() * .25), 1, .03, .03, .03, 0, VOID_DUST[random.nextInt(VOID_DUST.length)]);
             if (random.nextInt(6) == 0) p.spawnParticle(Particle.SQUID_INK, edge(.1), 0, 0, 0, 0, 0);
             if (p.getLocation().distanceSquared(centre) > 256) continue;
             if (random.nextInt(14) == 0) sound(p, centre, "minecraft:block.portal.ambient", .25f, pitch(.5f, .8f));
@@ -538,8 +598,8 @@ public final class Portal {
         var random = ThreadLocalRandom.current();
         Location centre = at(width / 2.0, height / 2.0, 0);
         for (Player p : audience(centre, 32)) {
-            for (int i = 0; i < 3; i++) p.spawnParticle(Particle.SNOWFLAKE, edge(random.nextDouble() * .4), 1, .1, .1, .1, .01);
-            for (int i = 0; i < 3; i++) p.spawnParticle(Particle.DUST, edge(random.nextDouble() * .2), 1, .03, .03, .03, 0, FROST_DUST[random.nextInt(FROST_DUST.length)]);
+            for (int i = 0, k = n(5); i < k; i++) p.spawnParticle(Particle.SNOWFLAKE, edge(random.nextDouble() * .4), 1, .1, .1, .1, .01);
+            for (int i = 0, k = n(3); i < k; i++) p.spawnParticle(Particle.DUST, edge(random.nextDouble() * .2), 1, .03, .03, .03, 0, FROST_DUST[random.nextInt(FROST_DUST.length)]);
             if (random.nextInt(3) == 0) p.spawnParticle(Particle.END_ROD, edge(random.nextDouble() * .5), 0, 0, -1, 0, .01);
             if (random.nextInt(2) == 0) p.spawnParticle(Particle.SNOWFLAKE, at(random.nextDouble(-1, width + 1), height + 1.5, random.nextDouble(.2, 2.5)), 0, 0, -1, 0, .03);
             if (p.getLocation().distanceSquared(centre) > 256) continue;
@@ -554,7 +614,7 @@ public final class Portal {
         Location centre = at(width / 2.0, height / 2.0, 0);
         for (Player p : world.getPlayers()) {
             if (p.getLocation().distanceSquared(centre) > 400 + width * width * 4) continue;
-            for (int i = 0; i < 3; i++) {
+            for (int i = 0, k = n(3); i < k; i++) {
                 // sparks wandering along the edge of the opening
                 double u = random.nextDouble() * (2 * width + 2 * height), px, py;
                 if (u < width) { px = u; py = height; }
@@ -574,9 +634,9 @@ public final class Portal {
         for (Player p : world.getPlayers()) {
             double distance = p.getLocation().distanceSquared(centre);
             if (distance > 900) continue;
-            for (int i = 0; i < 6; i++)
+            for (int i = 0, k = n(6); i < k; i++)
                 p.spawnParticle(Particle.DUST, riftEdge(random.nextDouble() * .2), 1, .03, .03, .03, 0, RIFT_DUST[random.nextInt(RIFT_DUST.length)]);
-            for (int i = 0; i < 2; i++) p.spawnParticle(Particle.ELECTRIC_SPARK, riftEdge(.05), 2, .08, .08, .08, .05);
+            for (int i = 0, k = n(2); i < k; i++) p.spawnParticle(Particle.ELECTRIC_SPARK, riftEdge(.05), 2, .08, .08, .08, .05);
             // particles from the surroundings are pulled into the rift
             if (random.nextInt(2) == 0) p.spawnParticle(Particle.REVERSE_PORTAL, riftEdge(1.0), 1, .2, .2, .2, .02);
             if (distance > 256) continue;

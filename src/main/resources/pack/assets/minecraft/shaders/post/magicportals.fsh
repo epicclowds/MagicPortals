@@ -320,13 +320,85 @@ vec3 fireRamp(float t) {
     return mix(c, vec3(1.0, 0.97, 0.8), smoothstep(0.85, 1.0, t));
 }
 
-// Frost: an oval whose rim is overgrown with ice crystals reaching into the opening.
-float frostSpikes(float angle) {
-    float s = max(0.0, kinkNoise(angle * 9.0 + 3.0) - 0.35) * 1.6;
-    return (0.05 + 0.3 * s * s) * min(OPENING_W, OPENING_H) / 3.0;
+// ----- shapes -----
+
+float triangleDistance(vec2 p, vec2 p0, vec2 p1, vec2 p2) {
+    vec2 e0 = p1 - p0, e1 = p2 - p1, e2 = p0 - p2;
+    vec2 v0 = p - p0, v1 = p - p1, v2 = p - p2;
+    vec2 q0 = v0 - e0 * clamp(dot(v0, e0) / dot(e0, e0), 0.0, 1.0);
+    vec2 q1 = v1 - e1 * clamp(dot(v1, e1) / dot(e1, e1), 0.0, 1.0);
+    vec2 q2 = v2 - e2 * clamp(dot(v2, e2) / dot(e2, e2), 0.0, 1.0);
+    float s = sign(e0.x * e2.y - e0.y * e2.x);
+    vec2 d = min(min(vec2(dot(q0, q0), s * (v0.x * e0.y - v0.y * e0.x)),
+                     vec2(dot(q1, q1), s * (v1.x * e1.y - v1.y * e1.x))),
+                     vec2(dot(q2, q2), s * (v2.x * e2.y - v2.y * e2.x)));
+    return -sqrt(d.x) * sign(d.y);
 }
 
-// Storm: one big lightning strike every ~0.8 s (not every beat); returns the flash strength.
+float pentagonDistance(vec2 p, vec2 a, vec2 b, vec2 c, vec2 d, vec2 e) {
+    vec2 v[5] = vec2[5](a, b, c, d, e);
+    float dist = dot(p - v[0], p - v[0]), s = 1.0;
+    for (int i = 0, j = 4; i < 5; j = i, i++) {
+        vec2 ed = v[j] - v[i], w = p - v[i];
+        vec2 q = w - ed * clamp(dot(w, ed) / dot(ed, ed), 0.0, 1.0);
+        dist = min(dist, dot(q, q));
+        bvec3 c3 = bvec3(p.y >= v[i].y, p.y < v[j].y, ed.x * w.y > ed.y * w.x);
+        if (all(c3) || all(not(c3))) s = -s;
+    }
+    return s * sqrt(dist);
+}
+
+// Inferno: a giant fire – a big flame with two smaller tongues at its sides, all swaying and flickering.
+float FLAME_HEIGHT = 4.6;
+float smoothMin(float a, float b, float k) { float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0); return mix(b, a, h) - k * h * (1.0 - h); }
+float flameTongue(vec2 p, float cx0, float height, float halfWidth, float phase, float time) {
+    float t = (p.y + 0.1) / height, tc = clamp(t, 0.0, 1.0);
+    float cx = cx0 + OPENING_W * 0.11 * pow(tc, 1.6) * sin(time * 2.1 + tc * 4.0 + phase)
+                   + OPENING_W * 0.05 * pow(tc, 2.0) * sin(time * 5.3 + tc * 9.0 + phase * 2.0);
+    float profile = tc < 0.3 ? 0.78 + 0.22 * sqrt(max(0.0, 1.0 - pow((0.3 - tc) / 0.3, 2.0))) : pow(1.0 - (tc - 0.3) / 0.7, 1.4);
+    float flicker = 1.0 + 0.14 * (noise1(tc * 6.0 - time * 3.5 + phase) - 0.5) + 0.1 * (noise1(tc * 17.0 - time * 7.0 + phase) - 0.5);
+    float e = (abs(p.x - cx) - halfWidth * profile * flicker) * 0.85;
+    if (t < 0.0) e = max(e, -0.1 - p.y);
+    if (t > 1.0) e = max(e, length(vec2(p.x - cx, p.y - (height - 0.1))));
+    return e;
+}
+float flameDistance(vec2 p, float time) {
+    float main = flameTongue(p, OPENING_W * 0.5, FLAME_HEIGHT, OPENING_W * 0.5, 0.0, time);
+    float left = flameTongue(p, OPENING_W * 0.2, FLAME_HEIGHT * 0.68, OPENING_W * 0.3, 1.7, time);
+    float right = flameTongue(p, OPENING_W * 0.8, FLAME_HEIGHT * 0.76, OPENING_W * 0.3, 3.9, time);
+    return smoothMin(smoothMin(main, left, 0.25), right, 0.25);
+}
+
+// Frost: a big ice crystal rising from the ground (you look through it), with smaller shards at its foot.
+float ICE_HEIGHT = 4.8;
+float iceDistance(vec2 p) {
+    float w = OPENING_W * 0.5 * 1.08, cx = OPENING_W * 0.5;
+    return pentagonDistance(p, vec2(cx - w, -0.2), vec2(cx + w, -0.2), vec2(cx + w * 0.9, ICE_HEIGHT * 0.62),
+                            vec2(cx, ICE_HEIGHT), vec2(cx - w * 0.9, ICE_HEIGHT * 0.62));
+}
+// Solid shards around the big crystal: x = distance, y = facet shade.
+vec2 iceShards(vec2 p) {
+    float w = OPENING_W * 0.5 * 1.08, cx = OPENING_W * 0.5, h = ICE_HEIGHT;
+    vec2 best = vec2(1e3, 0.0);
+    vec2 tips[4] = vec2[4](vec2(cx - w - 0.95, h * 0.5), vec2(cx + w + 0.75, h * 0.42), vec2(cx - w - 1.7, h * 0.22), vec2(cx + w + 1.45, h * 0.18));
+    vec2 feet[4] = vec2[4](vec2(cx - w + 0.35, cx - w - 0.45), vec2(cx + w - 0.35, cx + w + 0.4), vec2(cx - w - 0.7, cx - w - 1.35), vec2(cx + w + 0.55, cx + w + 1.15));
+    for (int i = 0; i < 4; i++) {
+        vec2 a = vec2(feet[i].x, -0.2), b = vec2(feet[i].y, -0.2), tip = tips[i];
+        float d = triangleDistance(p, a, b, tip);
+        if (d < best.x) {
+            vec2 mid = (a + b) * 0.5, axis = tip - mid;
+            float side = axis.x * (p.y - mid.y) - axis.y * (p.x - mid.x);
+            best = vec2(d, side > 0.0 ? 1.0 : 0.0);
+        }
+    }
+    return best;
+}
+
+// Storm: the eye of a storm – a round opening inside a ring of swirling thunderclouds.
+float stormRadius() { return min(OPENING_W, OPENING_H) * 0.5; }
+float stormRing() { return 0.55 + 0.25 * stormRadius(); }
+
+// Storm: one big lightning strike roughly every 0.8 s; returns the flash strength.
 float STORM_FLASH = 0.0;
 float stormBeat(float time) { return floor(time * 1.25); }
 float stormFlash(float time) {
@@ -339,28 +411,14 @@ float stormFlash(float time) {
 float styleDistance(int style, vec2 p, float time, out float angle) {
     vec2 c = openingCenter(), q = p - c;
     angle = atan(q.y, q.x);
-    if (style == 2) {
-        // pointed arch, the edge licking like a flame
-        float r = min(OPENING_W * 0.5, OPENING_H * 0.45);
-        float d = min(boxDistance(p, vec2(0.0), vec2(OPENING_W, OPENING_H - r)),
-                      ellipseDistance(p, vec2(c.x, OPENING_H - r), vec2(OPENING_W * 0.5, r)));
-        return d + 0.07 * (noise2(vec2(angle * 4.0, time * 3.0)) - 0.5);
-    }
-    if (style == 3) {
-        // oval, its edge crackling with electricity
-        float d = ellipseDistance(p, c, vec2(OPENING_W * 0.5, OPENING_H * 0.5 + 0.1));
-        return d + 0.05 * (kinkNoise(angle * 12.0 + floor(time * 12.0) * 3.1) - 0.5);
-    }
-    if (style == 4) {
-        // round vortex, slowly wobbling
-        return ellipseDistance(p, c, vec2(OPENING_W * 0.5, OPENING_H * 0.5)) + 0.035 * sin(angle * 5.0 + time * 2.0);
-    }
-    // frost
-    return ellipseDistance(p, c, vec2(OPENING_W * 0.5, OPENING_H * 0.5 + 0.05)) + frostSpikes(angle);
+    if (style == 2) return flameDistance(p, time);
+    if (style == 3) return length(q) - stormRadius() + 0.04 * (kinkNoise(angle * 12.0 + floor(time * 12.0) * 3.1) - 0.5);
+    if (style == 4) return ellipseDistance(p, c, vec2(OPENING_W * 0.5, OPENING_H * 0.5)) + 0.035 * sin(angle * 5.0 + time * 2.0);
+    return iceDistance(p);
 }
 
 // How far outside the edge a style still draws something.
-float styleReach(int style) { return style == 3 ? 6.0 : style == 2 ? 2.2 : 1.3; }
+float styleReach(int style) { return style == 3 ? stormRing() + 0.4 : style == 2 ? 1.6 : style == 5 ? 2.2 : 1.3; }
 
 // Lightning arcs leaving the edge (like the rift's, with parameters).
 vec3 edgeArcs(vec2 p, float e, float angle, float time, int count, float rate, float minLength, float maxLength, vec3 tint, float seed) {
@@ -383,20 +441,33 @@ vec3 edgeArcs(vec2 p, float e, float angle, float time, int count, float rate, f
     return glow;
 }
 
-// The big strike of the storm style: a jagged bolt from the sky through the portal to the ground.
+// Thundercloud density of the storm ring (0..1) and how much it is lit by lightning inside.
+vec2 stormCloud(vec2 p, float e, float angle, float time) {
+    float ring = stormRing();
+    if (e < -0.05 || e > ring) return vec2(0.0);
+    float swirl = angle + time * 0.35 + e * 1.2;
+    vec2 polar = vec2(swirl * 2.0, e * 2.2 - time * 0.15);
+    float n = noise2(polar * vec2(1.6, 1.0)) * 0.55 + noise2(polar * vec2(4.0, 2.6) + 7.0) * 0.3 + noise2(polar * vec2(9.0, 6.0) + 3.0) * 0.15;
+    float density = smoothstep(0.25, 0.75, n) * smoothstep(ring, ring * 0.35, e) * smoothstep(-0.05, 0.12, e);
+    density = max(density, smoothstep(ring * 0.55, 0.0, e) * smoothstep(-0.05, 0.08, e) * 0.85);
+    float sector = floor((swirl / 6.28318 + 0.5) * 9.0);
+    float lit = step(0.78, hash1(sector * 3.3 + floor(time * 7.0 + hash1(sector) * 3.0))) * (0.5 + 0.5 * n);
+    return vec2(density, max(lit, STORM_FLASH * 0.8));
+}
+
+// A big strike of the storm: a jagged bolt through the cloud ring and the opening down to the ground.
 vec3 stormBolt(vec2 p, float time) {
     float beat = stormBeat(time), phase = fract(time * 1.25);
-    if (hash1(beat * 3.7) < 0.35 || phase > 0.3 || p.y < -0.3 || p.y > OPENING_H + 6.0) return vec3(0.0);
-    float x = OPENING_W * (0.2 + 0.6 * hash1(beat * 1.9)) + 0.7 * (kinkNoise(p.y * 2.2 + beat * 7.0) - 0.5) + 0.15 * (kinkNoise(p.y * 9.0 + beat) - 0.5);
-    float dist = abs(p.x - x);
-    float fade = 1.0 - phase / 0.3;
-    vec3 c = vec3(1.0) * smoothstep(0.06, 0.0, dist) * 2.0 + vec3(0.55, 0.5, 1.0) * exp(-dist * 7.0) * 0.6;
-    // a side branch
-    float by = OPENING_H * (0.6 + 0.5 * hash1(beat * 4.3));
-    if (p.y < by && p.y > by - 1.6) {
-        float bx = x + (by - p.y) * (hash1(beat * 2.2) < 0.5 ? -0.6 : 0.6) + 0.2 * (kinkNoise(p.y * 7.0 + beat * 3.0) - 0.5);
+    float top = OPENING_H * 0.5 + stormRadius() + stormRing() * 0.8;
+    if (hash1(beat * 3.7) < 0.35 || phase > 0.3 || p.y < -0.2 || p.y > top) return vec3(0.0);
+    float x = OPENING_W * (0.3 + 0.4 * hash1(beat * 1.9)) + 0.5 * (kinkNoise(p.y * 2.4 + beat * 7.0) - 0.5) + 0.12 * (kinkNoise(p.y * 9.0 + beat) - 0.5);
+    float dist = abs(p.x - x), fade = (1.0 - phase / 0.3) * smoothstep(top, top - 0.4, p.y);
+    vec3 c = vec3(1.0) * smoothstep(0.05, 0.0, dist) * 2.0 + vec3(0.55, 0.5, 1.0) * exp(-dist * 9.0) * 0.5;
+    float by = OPENING_H * (0.45 + 0.4 * hash1(beat * 4.3));
+    if (p.y < by && p.y > by - 1.2) {
+        float bx = x + (by - p.y) * (hash1(beat * 2.2) < 0.5 ? -0.6 : 0.6) + 0.15 * (kinkNoise(p.y * 7.0 + beat * 3.0) - 0.5);
         float bd = abs(p.x - bx);
-        c += vec3(1.0) * smoothstep(0.035, 0.0, bd) * 1.4 + vec3(0.55, 0.5, 1.0) * exp(-bd * 9.0) * 0.35;
+        c += vec3(1.0) * smoothstep(0.03, 0.0, bd) * 1.3 + vec3(0.55, 0.5, 1.0) * exp(-bd * 11.0) * 0.3;
     }
     return c * fade;
 }
@@ -404,27 +475,26 @@ vec3 stormBolt(vec2 p, float time) {
 // Glow, flames, arcs and sparkles around the edge.
 vec3 styleGlow(int style, vec2 p, float e, float angle, float time) {
     if (style == 2) {
-        // flames rising from the edge, taller towards the top, with embers
-        float up = clamp((p.y - OPENING_H * 0.5) / OPENING_H + 0.6, 0.15, 1.3);
-        float n = noise2(vec2(p.x * 2.2, p.y * 1.6 - time * 2.6)) * 0.6 + noise2(vec2(p.x * 5.0, p.y * 3.5 - time * 4.5)) * 0.4;
-        float reach = (0.2 + 0.95 * up) * (0.45 + n);
-        float heat = e > 0.0 ? clamp(1.0 - e / reach, 0.0, 1.0) : exp(e * 9.0);
-        heat = pow(heat, 1.4);
-        vec3 c = fireRamp(heat * (0.7 + 0.4 * n)) * heat * 1.7;
-        c += vec3(1.0, 0.6, 0.15) * exp(-abs(e) * 30.0) * 1.1;
-        vec2 q = p * vec2(9.0, 6.0) + vec2(0.0, -time * 3.0);
+        // fire licking off the flame's outline, white-hot rim, embers rising
+        float up = clamp(p.y / FLAME_HEIGHT + 0.3, 0.2, 1.3);
+        float n = noise2(vec2(p.x * 2.4, p.y * 1.7 - time * 2.8)) * 0.6 + noise2(vec2(p.x * 5.5, p.y * 3.8 - time * 4.8)) * 0.4;
+        float reach = (0.12 + 0.7 * up) * (0.4 + n);
+        float heat = e > 0.0 ? clamp(1.0 - e / reach, 0.0, 1.0) : exp(e * 6.0);
+        heat = pow(heat, 1.3);
+        vec3 c = fireRamp(heat * (0.75 + 0.35 * n)) * heat * 1.6;
+        c += vec3(1.0, 0.85, 0.5) * exp(-abs(e) * 34.0) * 1.2;
+        vec2 q = p * vec2(9.0, 6.0) + vec2(0.0, -time * 3.2);
         float ember = step(0.94, hash2(floor(q))) * smoothstep(0.3, 0.0, length(fract(q) - 0.5));
-        c += vec3(1.0, 0.5, 0.1) * ember * exp(-max(e, 0.0) * 1.2) * step(-0.15, e);
+        c += vec3(1.0, 0.5, 0.1) * ember * exp(-max(e, 0.0) * 1.4) * step(-0.1, e);
         return c;
     }
     if (style == 3) {
         vec3 violet = vec3(0.6, 0.45, 1.0);
         float flicker = 0.6 + 0.4 * noise1(time * 25.0 + angle * 6.0);
-        vec3 c = mix(violet, vec3(1.0), 0.5) * exp(-abs(e) * 30.0) * 2.0 * flicker;
-        c += violet * (exp(-max(e, 0.0) * 4.0) * 0.25 + exp(-max(-e, 0.0) * 10.0) * 0.2) * flicker;
-        c += edgeArcs(p, e, angle, time, 10, 5.0, 0.4, 1.9, violet, 0.0);
+        vec3 c = mix(violet, vec3(1.0), 0.5) * exp(-abs(e) * 30.0) * 1.8 * flicker;
+        c += violet * exp(-max(-e, 0.0) * 10.0) * 0.2 * flicker * step(e, 0.0);
+        c += edgeArcs(p, e, angle, time, 8, 5.0, 0.25, stormRing() * 0.9, violet, 0.0);
         c += stormBolt(p, time);
-        c += vec3(0.75, 0.75, 1.0) * STORM_FLASH * 0.35 * exp(-max(e, 0.0) * 0.5);
         return c;
     }
     if (style == 4) {
@@ -434,56 +504,67 @@ vec3 styleGlow(int style, vec2 p, float e, float angle, float time) {
         float swirl2 = noise2(vec2(a * 2.0 + time * 0.7 - r * 3.0, r * 4.0));
         vec3 c = mix(vec3(0.55, 0.15, 0.95), vec3(0.95, 0.35, 0.85), swirl2) * exp(-max(e, 0.0) * 3.0) * step(0.0, e) * (0.3 + 0.7 * swirl) * 1.2;
         c += vec3(0.85, 0.6, 1.0) * exp(-abs(e) * 28.0) * 1.4;
-        // specks spiralling inwards
         vec2 polar = vec2(a * 4.0 / 3.14159 + time * 0.4, log(max(r, 0.05)) * 5.0 + time * 1.6);
         float speck = step(0.93, hash2(floor(polar))) * smoothstep(0.35, 0.0, length(fract(polar) - 0.5));
         c += vec3(0.9, 0.7, 1.0) * speck * step(0.0, e) * exp(-e * 1.8);
         return c;
     }
-    // frost: pale rim, cold haze and twinkling ice glitter
-    vec3 c = vec3(0.6, 0.9, 1.0) * exp(-abs(e) * 22.0) * 1.1 + vec3(0.5, 0.8, 1.0) * exp(-max(e, 0.0) * 5.0) * 0.22;
+    // frost: bright crystal edges, cold haze, glitter on the ice
+    vec3 c = vec3(0.7, 0.93, 1.0) * exp(-abs(e) * 26.0) * 1.2 + vec3(0.5, 0.8, 1.0) * exp(-max(e, 0.0) * 5.0) * 0.18;
+    float shard = iceShards(p).x;
+    c += vec3(0.75, 0.95, 1.0) * exp(-abs(shard) * 30.0) * 0.8;
+    // a sharp highlight running down the middle ridge of the crystal
+    float ridge = abs(p.x - OPENING_W * 0.5) / max(0.02, 0.05 * (1.0 - p.y / ICE_HEIGHT) + 0.01);
+    c += vec3(0.85, 0.97, 1.0) * smoothstep(1.0, 0.0, ridge) * step(e, 0.0) * smoothstep(ICE_HEIGHT * 0.3, ICE_HEIGHT, p.y) * 0.35;
     vec2 cell = floor(p * 14.0);
-    float twinkle = step(0.96, hash2(cell)) * max(0.0, sin(time * 3.0 + hash2(cell + 7.0) * 40.0));
-    c += vec3(1.0) * twinkle * smoothstep(0.3, 0.0, length(fract(p * 14.0) - 0.5)) * exp(-abs(e) * 2.0);
+    float twinkle = step(0.95, hash2(cell)) * max(0.0, sin(time * 3.0 + hash2(cell + 7.0) * 40.0));
+    c += vec3(1.0) * twinkle * smoothstep(0.3, 0.0, length(fract(p * 14.0) - 0.5)) * (exp(-abs(e) * 2.0) + step(shard, 0.0));
     return c;
 }
 
 // What the area right outside the edge looks like (base = the normal image there).
 vec3 styleOutside(int style, vec2 p, float e, float angle, float time, vec3 base) {
     if (style == 4) return base * mix(1.0, 0.12, exp(-e * 2.2));   // dark halo around the vortex
-    if (style == 2) return base * mix(1.0, 0.55, exp(-e * 3.0));   // scorched surroundings
-    if (style == 5) {
-        float plain = ellipseDistance(p, openingCenter(), vec2(OPENING_W * 0.5, OPENING_H * 0.5 + 0.05));
-        if (plain < 0.0) {
-            // ice crystal growing into the opening: faceted, translucent blue-white
-            float facet = step(0.5, fract(angle * 9.0 / 6.28318 * 6.0 + 0.5));
-            float depth = clamp(-plain / max(frostSpikes(angle), 0.01), 0.0, 1.0);
-            vec3 ice = mix(vec3(0.55, 0.8, 0.95), vec3(0.9, 0.97, 1.0), 0.35 + 0.4 * facet + 0.25 * depth);
-            return ice * (0.85 + 0.15 * sin(time * 1.5 + angle * 20.0));
-        }
-        return base * mix(1.0, 1.25, exp(-plain * 4.0));   // frosty brightening
+    if (style == 2) return base * mix(1.0, 0.6, exp(-e * 3.5));    // scorched surroundings
+    if (style == 3) {
+        vec2 cloud = stormCloud(p, e, angle, time);
+        vec3 grey = mix(vec3(0.07, 0.07, 0.11), vec3(0.3, 0.3, 0.4), noise2(p * 3.0 + time * 0.2));
+        vec3 lit = mix(grey, vec3(0.8, 0.75, 1.0), cloud.y);
+        return mix(base, lit, cloud.x);
     }
-    return base;
+    vec2 shard = iceShards(p);
+    if (shard.x < 0.0) {
+        float depth = clamp(-shard.x * 4.0, 0.0, 1.0);
+        vec3 ice = mix(vec3(0.5, 0.75, 0.92), vec3(0.88, 0.97, 1.0), 0.3 + 0.45 * shard.y + 0.25 * depth);
+        return mix(base, ice, 0.85) * (0.9 + 0.1 * sin(time * 1.5 + p.y * 6.0));
+    }
+    return base * mix(1.0, 1.2, exp(-max(e, 0.0) * 4.0));   // frosty brightening
 }
 
 // Inside, seen from the front: tint over the destination world near the edge.
 vec3 styleInside(int style, vec3 scene, vec2 p, float e, float time) {
-    if (style == 2) return mix(scene, scene * vec3(1.2, 0.7, 0.45), exp(e * 5.0));
-    if (style == 3) return scene * mix(1.0, 0.6, exp(e * 8.0)) + vec3(0.75, 0.75, 1.0) * STORM_FLASH * 0.25;
+    if (style == 2) return mix(scene, scene * vec3(1.25, 0.75, 0.45), exp(e * 4.0));
+    if (style == 3) {
+        float angle = atan(p.y - OPENING_H * 0.5, p.x - OPENING_W * 0.5);
+        vec2 cloud = stormCloud(p, e, angle, time);
+        vec3 lit = mix(vec3(0.12, 0.12, 0.17), vec3(0.8, 0.75, 1.0), cloud.y);
+        return mix(scene * mix(1.0, 0.7, exp(e * 6.0)), lit, cloud.x * 0.8) + vec3(0.75, 0.75, 1.0) * STORM_FLASH * 0.15;
+    }
     if (style == 4) {
         vec2 q = (p - openingCenter()) / vec2(OPENING_W * 0.5, OPENING_H * 0.5);
         float swirl = 0.5 + 0.5 * sin(atan(q.y, q.x) * 3.0 + length(q) * 9.0 - time * 2.5);
         return scene * mix(1.0, 0.15 + 0.35 * swirl, exp(e * 3.5)) + vec3(0.3, 0.05, 0.45) * exp(e * 4.0) * 0.5;
     }
-    return mix(scene, vec3(0.85, 0.93, 1.0), exp(e * 6.0) * 0.55);   // frost mist at the rim
+    // looking through ice: blue tint, frosted towards the edges
+    return mix(scene * vec3(0.85, 0.95, 1.08), vec3(0.85, 0.94, 1.0), exp(e * 3.5) * 0.6);
 }
 
 // Seen from behind: no destination, but a style-specific surface.
 vec3 styleBack(int style, vec2 p, float time) {
     if (style == 2) {
-        float n = noise2(p * 1.5 + vec2(0.0, time * 0.2));
-        float crack = 1.0 - smoothstep(0.0, 0.07, abs(noise2(p * 2.5 + time * 0.1) - 0.5));
-        return mix(vec3(0.08, 0.02, 0.01), vec3(0.35, 0.05, 0.0), n) + fireRamp(0.9) * crack * (0.6 + 0.4 * sin(time * 2.0 + n * 6.0));
+        float t = p.y / FLAME_HEIGHT;
+        float n = noise2(vec2(p.x * 2.0, p.y * 1.4 - time * 2.0));
+        return fireRamp(clamp(1.05 - t * 0.7 + (n - 0.5) * 0.4, 0.0, 1.0)) * 1.1;
     }
     if (style == 3) {
         float n = noise2(p * 1.2 + vec2(time * 0.3, 0.0)) * 0.6 + noise2(p * 3.0 - time * 0.4) * 0.4;
@@ -495,10 +576,10 @@ vec3 styleBack(int style, vec2 p, float time) {
         float arms = 0.5 + 0.5 * sin(a * 2.0 - r * 10.0 + time * 1.8);
         return vec3(0.25, 0.05, 0.4) * arms * smoothstep(0.1, 1.0, r) * 0.8;
     }
-    vec2 cell = floor(p * 2.2);
     float n = noise2(p * 2.0);
     float crack = 1.0 - smoothstep(0.0, 0.05, abs(noise2(p * 3.5 + 11.0) - 0.5));
-    return mix(vec3(0.55, 0.75, 0.9), vec3(0.85, 0.95, 1.0), n) - vec3(0.25, 0.15, 0.05) * crack + 0.05 * hash2(cell);
+    float facet = step(OPENING_W * 0.5, p.x);
+    return mix(vec3(0.55, 0.78, 0.92), vec3(0.85, 0.95, 1.0), n * 0.7 + facet * 0.3) - vec3(0.25, 0.15, 0.05) * crack;
 }
 
 void main() {
@@ -525,6 +606,8 @@ void main() {
     RIFT_HALF_WIDTH = 0.8 * OPENING_W / 3.0;
     float time = readData(31) * 1200.0;                 // seconds within one game day
     STORM_FLASH = style == 3 ? stormFlash(time) : 0.0;
+    FLAME_HEIGHT = OPENING_H * 1.55;
+    ICE_HEIGHT = OPENING_H * 1.6;
     if (scene < 0 || scene >= DP_SCENES) return;
 
     // The eye is the point the projection maps to w = 0. View bobbing lives in the projection
@@ -597,6 +680,9 @@ void main() {
                 float twist = 0.6 * exp(e * 2.0) * (0.8 + 0.2 * sin(time));
                 vec2 c = openingCenter(), q = hit.xy - c;
                 start.xy = c + mat2(cos(twist), sin(twist), -sin(twist), cos(twist)) * q;
+            } else if (style == 5) {
+                // the ice crystal refracts the view a little towards its edges
+                start.xy += vec2(hit.x - OPENING_W * 0.5, 0.0) * 0.12 * exp(e * 2.0);
             }
             color = styleInside(style, march(start + d * 1e-3, d, scene), hit.xy, e, time);
         } else color = styleOutside(style, hit.xy, e, angle, time, base.rgb);

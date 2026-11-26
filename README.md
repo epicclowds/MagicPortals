@@ -19,7 +19,7 @@
 
 - **See where you are going.** The opening shows the real destination – blocks, textures, light, water, plants, fog – in true 3D with parallax as you move. No fake blocks, no server load: a post-processing shader draws it on the client.
 - **Walk through to switch servers.** Players step into the portal and Velocity moves them to the target server, where they arrive right in front of the portal leading back.
-- **Six styles.** `gate` – an opening in a thick stone wall. `rift` – a jagged dimensional crack with lightning arcs. `inferno` – a burning arch for the Nether. `storm` – a crackling oval with lightning strikes for boss chambers. `void` – a swirling vortex. `frost` – an oval overgrown with ice crystals. Optional ambient sounds with adjustable volume.
+- **Six styles.** `gate` – an opening in a thick stone wall. `rift` – a jagged dimensional crack with lightning arcs. `inferno` – a giant fire for the Nether. `storm` – the eye of a thunderstorm with lightning strikes for boss chambers. `void` – a swirling vortex. `frost` – a huge ice crystal rising from the ground. Optional sounds (adjustable volume), particle amount and player effects like a frozen screen.
 - **Any size, your own frame.** Mark the opening with the Portal Wand (`/mp wand`) – up to 7×7 blocks – and build your own frame around it. Rifts scale with the portal size.
 - **Fly inside (optional).** With `inside-view: true`, spectators and replay/freecam cameras that pass through the opening end up *inside* the destination and can look around in every direction.
 - **Works with your resource-pack setup.** Delivered through **Oraxen**, **ItemsAdder** or a **built-in web server** (no extra plugin needed). Ultimate UI is detected automatically.
@@ -105,7 +105,7 @@ All commands need `magicportals.admin` (default: op). Aliases: `/mp`, `/magicpor
 | `/mp list` | Portals on this server: target, position, style, online state, scene number |
 | `/mp wand` | Get the Portal Wand to mark an opening of any size (left-click / right-click the two corners) |
 | `/mp set <server> [name]` | Create or move the portal to `<server>`: into the opening marked with the wand (facing the side you stand on), otherwise 3 blocks in front of you (facing you) |
-| `/mp edit <server> [setting] [value]` | Show or change a portal's settings in game: `name`, `style`, `facing`, `width`, `height`, `inside-view`, `barriers`, `label`, `sound`, `volume`, `frame` (`none`/`wall`). Applied immediately; after `facing`/`width`/`height` run `/mp update` |
+| `/mp edit <server> [setting] [value]` | Show or change a portal's settings in game: `name`, `style`, `facing`, `width`, `height`, `inside-view`, `barriers`, `label`, `sound`, `volume`, `particles`, `effects`, `frame` (`none`/`wall`). Applied immediately; after `facing`/`width`/`height` run `/mp update` |
 | `/mp remove <server>` | Delete the portal to `<server>` |
 | `/mp style <server> <style>` | Change the look: `gate`, `rift`, `inferno`, `storm`, `void`, `frost` |
 | `/mp update` | Bake all portal views and deliver the resource pack (pack server only) |

@@ -77,6 +77,8 @@ One entry per portal on this server. The key is the **target server**.
 | `label` | `false` | `true` shows the name (and an "offline" note while the target is down) floating above the portal. |
 | `sound` | `false` | `true` plays the style's ambient sounds (crackling fire, thunder, humming …) to players nearby. Sound category *Ambient/Environment*, so players can turn it down in their settings. |
 | `volume` | `1.0` | Volume of those sounds, `0` – `4` (above 1 they also carry further). |
+| `particles` | `1.0` | Amount of particles, `0` (none) – `5`. |
+| `effects` | `false` | `true` turns on the style's effect on nearby players (see [Styles](#styles)): burning, frozen screen, darkness, camera jolt. Only visual, no damage. |
 | `style` | `gate` | The look, see [Styles](#styles): `gate`, `rift`, `inferno`, `storm`, `void`, `frost`. |
 | `x`, `y`, `z` | auto | Position of the portal (see below). If missing, MagicPortals places the portal on flat ground near the world spawn and writes the coordinates back. |
 | `facing` | `south` | Direction the opening faces, i.e. the side players walk in from: `south`, `north`, `east` or `west`. `/mp set` fills this in for you. |
@@ -106,10 +108,10 @@ Change a portal's look at any time with `/mp edit <server> style <name>` (or `/m
 |---|---|---|---|---|
 | `gate` | Rectangle in a stone wall (or your own frame) | Glowing cyan inner edge, sparks | Flat | Spawn, hubs |
 | `rift` | Tall jagged crack | Cyan / magenta / gold edge, lightning arcs, sparkles, particles pulled in | Starry nebula | Anything magical |
-| `inferno` | Pointed arch | Flames licking up from the edge, embers, heat shimmer in the opening, smoke and lava drips | Glowing lava crust | Nether, fire dungeons |
-| `storm` | Crackling oval | Violet-white electric rim, long lightning arcs, a bolt striking through the portal with a flash; every few seconds a (harmless) lightning strike hits the ground in front of it | Dark thunderclouds lighting up | Boss chambers, arenas |
-| `void` | Round vortex | Swirling purple rim and dark halo, the view twisted towards the edge, specks spiralling in | Black spiral | The End, void worlds |
-| `frost` | Oval overgrown with ice crystals | Pale rim, cold mist, glitter, snowflakes falling | Ice with cracks | Winter areas, ice dungeons |
+| `inferno` | A giant fire: one big flame with two smaller tongues, swaying and flickering | Fire licking off the outline, embers, heat shimmer in the opening, smoke and lava drips. Effect: players right in front of it burn (only visually) | Wall of fire | Nether, fire dungeons |
+| `storm` | Eye of the storm: round opening in a ring of swirling thunderclouds | Clouds lit by lightning from inside, electric rim, arcs, a bolt striking through the opening; every few seconds a (harmless) lightning strike hits the ground in front of it. Effect: the camera of players next to a strike jolts | Dark thunderclouds | Boss chambers, arenas |
+| `void` | Round vortex | Swirling purple rim and dark halo, the view twisted towards the edge, specks spiralling in. Effect: darkness pulses over the screen of players nearby | Black spiral | The End, void worlds |
+| `frost` | A big ice crystal rising from the ground, with smaller shards at its foot | You look through the ice (blue tint, frosted edges, slight refraction), glitter, cold mist, snowflakes. Effect: the screen freezes over like in powder snow – never long enough to hurt | Cracked ice | Winter areas, ice dungeons |
 
 Sounds are off by default (`sound: false`). The lightning strikes of `storm` are only particles, a short flash of light (client-side) and – with sound on – thunder for nearby players; they do no damage, start no fires and are not heard across the whole world like real lightning.
 

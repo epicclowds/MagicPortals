@@ -202,7 +202,8 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                     noFrame ? null : material(p.getString("frame.outer"), Material.STONE_BRICKS),
                     noFrame ? null : material(p.getString("frame.inner"), Material.POLISHED_BLACKSTONE_BRICKS),
                     style, p.getBoolean("inside-view", false), p.getBoolean("barriers", false), p.getBoolean("label", false),
-                    p.getBoolean("sound", false), (float) p.getDouble("volume", 1.0), messages.get("offline.sign")));
+                    p.getBoolean("sound", false), (float) p.getDouble("volume", 1.0), p.getDouble("particles", 1.0), p.getBoolean("effects", false),
+                    messages.get("offline.sign")));
         }
         scenesVersion = -1;
         for (Portal p : portals) {
@@ -564,6 +565,8 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         EDITABLE.put("label", List.of("true", "false"));
         EDITABLE.put("sound", List.of("true", "false"));
         EDITABLE.put("volume", List.of("0.25", "0.5", "1", "1.5", "2"));
+        EDITABLE.put("particles", List.of("0", "0.5", "1", "2", "3", "5"));
+        EDITABLE.put("effects", List.of("true", "false"));
         EDITABLE.put("frame", List.of("none", "wall"));
     }
 
@@ -589,6 +592,8 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                     case "label" -> c.getBoolean(path + ".label", false);
                     case "sound" -> c.getBoolean(path + ".sound", false);
                     case "volume" -> c.getDouble(path + ".volume", 1.0);
+                    case "particles" -> c.getDouble(path + ".particles", 1.0);
+                    case "effects" -> c.getBoolean(path + ".effects", false);
                     default -> "none".equalsIgnoreCase(c.getString(path + ".frame")) ? "none" : "wall";
                 };
                 sender.sendMessage(Component.text("  " + key + ": ", NamedTextColor.GRAY).append(Component.text(String.valueOf(value))));
@@ -603,10 +608,10 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         switch (key) {
             case "name" -> stored = raw;
             case "style" -> { Style s = Style.parse(value); stored = s == null ? null : s.id; }
-            case "volume" -> {
+            case "volume", "particles" -> {
                 double v;
                 try { v = Double.parseDouble(value.replace(',', '.')); } catch (NumberFormatException e) { v = -1; }
-                stored = v >= 0 && v <= 4 ? v : null;
+                stored = v >= 0 && v <= (key.equals("volume") ? 4 : 5) ? v : null;
             }
             case "facing" -> stored = EDITABLE.get("facing").contains(value) ? value : null;
             case "width", "height" -> {
@@ -614,7 +619,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                 try { n = Integer.parseInt(value); } catch (NumberFormatException e) { n = 0; }
                 stored = n >= 1 && n <= Portal.MAX_SIZE ? n : null;
             }
-            case "inside-view", "barriers", "label", "sound" -> stored = switch (value) { case "true", "on", "yes", "an", "ja" -> true; case "false", "off", "no", "aus", "nein" -> false; default -> null; };
+            case "inside-view", "barriers", "label", "sound", "effects" -> stored = switch (value) { case "true", "on", "yes", "an", "ja" -> true; case "false", "off", "no", "aus", "nein" -> false; default -> null; };
             default -> stored = value.equals("none") ? "none" : value.equals("wall") ? "wall" : null;
         }
         if (stored == null) { sender.sendMessage(error("edit.invalid", raw, key, String.join(", ", EDITABLE.get(key)))); return; }
