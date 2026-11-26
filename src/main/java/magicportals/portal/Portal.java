@@ -533,11 +533,28 @@ public final class Portal {
         if (fill.equals("none")) return;
         boolean near = p.getWorld() == world && p.getLocation().distanceSquared(at(width / 2.0, height / 2.0, 0)) < 64 * 64;
         UUID id = p.getUniqueId();
-        if (near && (filled.add(id) || tick % 100 == 0)) p.sendMultiBlockChange(fillBlocks(false));   // resent now and then: chunk updates overwrite it
+        if (near && (filled.add(id) || tick % 100 == 0)) {   // resent now and then: chunk updates overwrite it
+            var blocks = fillBlocks(false);
+            p.sendMultiBlockChange(blocks);
+            if (fill.equals("end")) agedGateways(p, blocks.keySet());
+        }
         else if (!near && filled.remove(id) && p.getWorld() == world) p.sendMultiBlockChange(fillBlocks(true));
     }
 
     public void resetFill(Player p) { filled.remove(p.getUniqueId()); }
+
+    /**
+     * A new end gateway shows a beacon-like beam for its first 200 ticks (and the client creates a new one for
+     * every block change). Sending the block entity with a high age right after the block keeps it calm.
+     */
+    private void agedGateways(Player p, Collection<Position> cells) {
+        for (Position cell : cells) {
+            var gateway = (org.bukkit.block.EndGateway) Material.END_GATEWAY.createBlockData().createBlockState();
+            gateway.setAge(100_000);
+            try { p.sendBlockUpdate(new Location(world, cell.blockX(), cell.blockY(), cell.blockZ()), gateway); }
+            catch (IllegalArgumentException e) { return; }   // not supported by this server version: beam stays
+        }
+    }
 
     /**
      * Plays the sound of a slot if sounds are enabled for this portal, scaled by its volume. A custom sound
