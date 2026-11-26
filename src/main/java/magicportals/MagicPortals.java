@@ -8,6 +8,7 @@ import magicportals.bake.SceneBaker;
 import magicportals.exchange.Exchange;
 import magicportals.exchange.MySqlExchange;
 import magicportals.pack.ResourcePack;
+import magicportals.portal.Facing;
 import magicportals.portal.Portal;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
@@ -195,7 +196,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             String style = p.getString("style", "gate").toLowerCase(Locale.ROOT);
             boolean noFrame = "none".equalsIgnoreCase(p.getString("frame"));
             portals.add(new Portal(this, world, target, name, pos[0], pos[1], pos[2],
-                    p.getInt("width", 3), p.getInt("height", 3),
+                    Facing.parse(p.getString("facing", "south")), p.getInt("width", 3), p.getInt("height", 3),
                     noFrame ? null : material(p.getString("frame.outer"), Material.STONE_BRICKS),
                     noFrame ? null : material(p.getString("frame.inner"), Material.POLISHED_BLACKSTONE_BRICKS),
                     style.equals("rift"), p.getBoolean("inside-view", false), messages.get("offline.sign")));
@@ -394,19 +395,53 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         if (isWand(e.getPlayer().getInventory().getItemInMainHand())) e.setCancelled(true);
     }
 
+    /** A portal placed into a marked opening: anchor cell (config x/y/z), size and facing. */
+    private record Placement(int x, int y, int z, int width, int height, Facing facing) { }
+
+    /**
+     * The opening between two corner blocks lies in a plane of constant z (opening faces south or north)
+     * or constant x (east or west). It faces the side the player stands on. Null if the corners do not lie
+     * in one plane.
+     */
+    private static Placement placement(Location a, Location b, Location player) {
+        int minX = Math.min(a.getBlockX(), b.getBlockX()), maxX = Math.max(a.getBlockX(), b.getBlockX());
+        int minY = Math.min(a.getBlockY(), b.getBlockY()), maxY = Math.max(a.getBlockY(), b.getBlockY());
+        int minZ = Math.min(a.getBlockZ(), b.getBlockZ()), maxZ = Math.max(a.getBlockZ(), b.getBlockZ());
+        int h = maxY - minY + 1;
+        double dx = player.getX() - (minX + maxX + 1) / 2.0, dz = player.getZ() - (minZ + maxZ + 1) / 2.0;
+        boolean zPlane = minZ == maxZ, xPlane = minX == maxX;
+        if (zPlane && xPlane) { zPlane = Math.abs(dz) >= Math.abs(dx); xPlane = !zPlane; }   // 1 block wide
+        if (zPlane) {
+            int w = maxX - minX + 1, half = (w - 1) / 2;
+            return dz > 0 ? new Placement(minX + half, minY, minZ, w, h, Facing.SOUTH) : new Placement(maxX - half, minY, minZ, w, h, Facing.NORTH);
+        }
+        if (xPlane) {
+            int w = maxZ - minZ + 1, half = (w - 1) / 2;
+            return dx > 0 ? new Placement(minX, minY, maxZ - half, w, h, Facing.EAST) : new Placement(minX, minY, minZ + half, w, h, Facing.WEST);
+        }
+        return null;
+    }
+
+    private String facingName(Facing facing) { return messages.get("facing." + facing.name().toLowerCase(Locale.ROOT)); }
+
     /** Outlines the marked opening with particles for a few seconds and reports its size. */
     private void showSelection(Player player, Location a, Location b) {
         int minX = Math.min(a.getBlockX(), b.getBlockX()), maxX = Math.max(a.getBlockX(), b.getBlockX()) + 1;
         int minY = Math.min(a.getBlockY(), b.getBlockY()), maxY = Math.max(a.getBlockY(), b.getBlockY()) + 1;
-        double z = a.getBlockZ();
-        if (a.getBlockZ() != b.getBlockZ()) { player.sendMessage(error("wand.flat")); return; }
-        player.sendMessage(text("wand.ready", maxX - minX, maxY - minY));
+        int minZ = Math.min(a.getBlockZ(), b.getBlockZ()), maxZ = Math.max(a.getBlockZ(), b.getBlockZ()) + 1;
+        boolean zPlane = maxZ - minZ == 1, xPlane = maxX - minX == 1;
+        if (!zPlane && !xPlane) { player.sendMessage(error("wand.flat")); return; }
+        boolean alongX = zPlane;   // a single block column counts as a z plane here
+        // the outline runs through the middle of the marked blocks
+        double u0 = alongX ? minX : minZ, u1 = alongX ? maxX : maxZ, fixed = alongX ? minZ + .5 : minX + .5;
+        player.sendMessage(text("wand.ready", (int) (u1 - u0), maxY - minY));
         var dust = new Particle.DustOptions(Color.fromRGB(255, 77, 242), 1f);
         for (int t = 0; t < 6; t++) Bukkit.getScheduler().runTaskLater(this, () -> {
             for (double s = 0; s <= 1.001; s += .05) {
-                double px = minX + (maxX - minX) * s, py = minY + (maxY - minY) * s;
-                for (double[] p : new double[][]{{px, minY}, {px, maxY}, {minX, py}, {maxX, py}})
-                    player.spawnParticle(Particle.DUST, p[0], p[1], z, 1, 0, 0, 0, 0, dust);
+                double pu = u0 + (u1 - u0) * s, py = minY + (maxY - minY) * s;
+                for (double[] p : new double[][]{{pu, minY}, {pu, maxY}, {u0, py}, {u1, py}})
+                    if (alongX) player.spawnParticle(Particle.DUST, p[0], p[1], fixed, 1, 0, 0, 0, 0, dust);
+                    else player.spawnParticle(Particle.DUST, fixed, p[1], p[0], 1, 0, 0, 0, 0, dust);
             }
         }, t * 10L);
     }
@@ -435,7 +470,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             case "list" -> {
                 sender.sendMessage(text("list.header", server, exchangeName()));
                 if (portals.isEmpty()) sender.sendMessage(text("list.none"));
-                for (Portal p : portals) sender.sendMessage(Component.text("  → " + p.target + "  " + p.x + " " + p.y + " " + p.z + "  " + messages.get(p.rift ? "style.rift" : "style.gate") + "  ")
+                for (Portal p : portals) sender.sendMessage(Component.text("  → " + p.target + "  " + p.x + " " + p.y + " " + p.z + " " + facingName(p.facing) + "  " + messages.get(p.rift ? "style.rift" : "style.gate") + "  ")
                         .append(p.reachable() ? Component.text(messages.get("list.online"), NamedTextColor.GREEN) : Component.text(messages.get("list.offline"), NamedTextColor.RED))
                         .append(Component.text(p.scene() == null ? messages.get("list.noscene") : messages.get("list.scene", p.scene()), NamedTextColor.GRAY)));
             }
@@ -447,26 +482,31 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                 String path = "portals." + target;
                 Location[] sel = selections.get(player.getUniqueId());
                 if (sel != null && sel[0] != null && sel[1] != null) {
-                    // opening marked with the wand: exactly these blocks, no frame (built by hand)
+                    // opening marked with the wand: exactly these blocks, no frame (built by hand),
+                    // facing the side the player stands on
                     Location a = sel[0], b = sel[1];
-                    if (a.getWorld() != world || b.getWorld() != world || a.getBlockZ() != b.getBlockZ()) { sender.sendMessage(error("wand.flat")); return true; }
-                    int minX = Math.min(a.getBlockX(), b.getBlockX()), minY = Math.min(a.getBlockY(), b.getBlockY());
-                    int w = Math.abs(a.getBlockX() - b.getBlockX()) + 1, h = Math.abs(a.getBlockY() - b.getBlockY()) + 1;
-                    if (w > Portal.MAX_SIZE || h > Portal.MAX_SIZE) { sender.sendMessage(error("wand.size", Portal.MAX_SIZE)); return true; }
-                    getConfig().set(path + ".x", minX + (w - 1) / 2);
-                    getConfig().set(path + ".y", minY);
-                    getConfig().set(path + ".z", a.getBlockZ());
-                    getConfig().set(path + ".width", w);
-                    getConfig().set(path + ".height", h);
+                    Placement pl = a.getWorld() == world && b.getWorld() == world ? placement(a, b, player.getLocation()) : null;
+                    if (pl == null) { sender.sendMessage(error("wand.flat")); return true; }
+                    if (pl.width > Portal.MAX_SIZE || pl.height > Portal.MAX_SIZE) { sender.sendMessage(error("wand.size", Portal.MAX_SIZE)); return true; }
+                    getConfig().set(path + ".x", pl.x);
+                    getConfig().set(path + ".y", pl.y);
+                    getConfig().set(path + ".z", pl.z);
+                    getConfig().set(path + ".facing", pl.facing.name().toLowerCase(Locale.ROOT));
+                    getConfig().set(path + ".width", pl.width);
+                    getConfig().set(path + ".height", pl.height);
                     getConfig().set(path + ".frame", "none");
                     selections.remove(player.getUniqueId());
-                    sender.sendMessage(text("set.selection", target, w, h));
+                    sender.sendMessage(text("set.selection", target, pl.width, pl.height, facingName(pl.facing)));
                 } else {
+                    // 3 blocks in the look direction, the opening facing the player
                     Location l = player.getLocation();
-                    getConfig().set(path + ".x", l.getBlockX());
+                    var look = l.getDirection();
+                    Facing facing = Facing.towards(-look.getX(), -look.getZ());
+                    getConfig().set(path + ".x", l.getBlockX() - 3 * facing.zx);
                     getConfig().set(path + ".y", l.getBlockY());
-                    getConfig().set(path + ".z", l.getBlockZ() - 3);
-                    sender.sendMessage(text("set.done", target));
+                    getConfig().set(path + ".z", l.getBlockZ() - 3 * facing.zz);
+                    getConfig().set(path + ".facing", facing.name().toLowerCase(Locale.ROOT));
+                    sender.sendMessage(text("set.done", target, facingName(facing)));
                 }
                 if (!getConfig().contains(path + ".style")) getConfig().set(path + ".style", "gate");
                 if (args.length >= 3) getConfig().set(path + ".name", String.join(" ", Arrays.copyOfRange(args, 2, args.length)));

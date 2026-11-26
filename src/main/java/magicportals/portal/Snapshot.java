@@ -6,7 +6,6 @@ import java.util.*;
 import java.util.logging.Logger;
 import org.bukkit.Bukkit;
 import org.bukkit.Material;
-import org.bukkit.World;
 import org.bukkit.block.data.BlockData;
 import org.bukkit.block.structure.StructureRotation;
 
@@ -38,45 +37,45 @@ public final class Snapshot {
         return ids.computeIfAbsent(block, k -> { palette.add(k); return (short) (palette.size() - 1); });
     }
 
-    private static BlockData rotated(BlockData block) {
+    /** Reads the block in a cell of the capturing portal's local grid (see {@link Portal}): i along the
+     *  opening, j up from the portal floor, k towards the viewer side (k = 0 is the wall row). */
+    interface CellReader { BlockData at(int i, int j, int k); }
+
+    static BlockData rotated(BlockData block, StructureRotation rotation) {
         if (block.getMaterial().isAir() || block.getMaterial() == Material.BARRIER) return AIR;
+        if (rotation == StructureRotation.NONE) return block;
         block = block.clone();
-        block.rotate(StructureRotation.CLOCKWISE_180);
+        block.rotate(rotation);
         return block;
     }
 
-    /** Front of the own portal, for the other side: rotated by 180° so the viewer over there looks north
-     *  and sees what lies south of this portal. Row z is the portal wall, the view starts right in front of it. */
-    void captureFront(World w, int x, int y, int z, int d) {
-        for (int ry = -BELOW; ry < ABOVE; ry++) {
-            int wy = y + ry;
-            if (wy < w.getMinHeight() || wy >= w.getMaxHeight()) continue;
-            for (int rx = -SIDE; rx <= SIDE; rx++) data[index(rx, ry, d)] = id(rotated(w.getBlockData(x - rx, wy, z + 1 + d)));
-        }
+    /** Front of the own portal, for the other side. Mirrored around the opening and rotated into the
+     *  viewer's frame, so the viewer over there looks through and sees what lies in front of this portal.
+     *  The view starts right in front of the wall row. */
+    void captureFront(CellReader r, int width, StructureRotation rotation, int d) {
+        int a = (width - 1) / 2;
+        for (int ry = -BELOW; ry < ABOVE; ry++)
+            for (int rx = -SIDE; rx <= SIDE; rx++) data[index(rx, ry, d)] = id(rotated(r.at(width - 1 - a - rx, ry, 1 + d), rotation));
     }
 
-    /** Back of the own portal, for the other side's in-between view, also rotated by 180°.
-     *  d = 0 is the row of the portal wall; the wall itself consists of display entities and barriers
-     *  and therefore does not show up, the ground of that row does. */
-    void captureBack(World w, int x, int y, int z, int d) {
-        for (int ry = -BELOW; ry < ABOVE; ry++) {
-            int wy = y + ry;
-            if (wy < w.getMinHeight() || wy >= w.getMaxHeight()) continue;
-            for (int rx = -SIDE; rx <= SIDE; rx++) data[index(rx, ry, d)] = id(rotated(w.getBlockData(x - rx, wy, z - d)));
-        }
+    /** Back of the own portal, for the other side's in-between view, mirrored and rotated the same way.
+     *  d = 0 is the wall row; the wall itself consists of display entities and barriers and therefore
+     *  does not show up, the ground of that row does. */
+    void captureBack(CellReader r, int width, StructureRotation rotation, int d) {
+        int a = (width - 1) / 2;
+        for (int ry = -BELOW; ry < ABOVE; ry++)
+            for (int rx = -SIDE; rx <= SIDE; rx++) data[index(rx, ry, d)] = id(rotated(r.at(width - 1 - a - rx, ry, -d), rotation));
     }
 
-    /** The real blocks behind this portal, unrotated – what players see without the portal; used to
-     *  restore fallback blocks when a player looks away. */
-    void captureBehind(World w, int x, int y, int z, int d) {
-        for (int ry = -BELOW; ry < ABOVE; ry++) {
-            int wy = y + ry;
-            if (wy < w.getMinHeight() || wy >= w.getMaxHeight()) continue;
+    /** The real blocks behind this portal in world orientation – what players see without the portal;
+     *  used to restore fallback blocks when a player looks away. */
+    void captureBehind(CellReader r, int width, int d) {
+        int a = (width - 1) / 2;
+        for (int ry = -BELOW; ry < ABOVE; ry++)
             for (int rx = -SIDE; rx <= SIDE; rx++) {
-                BlockData b = w.getBlockData(x + rx, wy, z - 1 - d);
+                BlockData b = r.at(a + rx, ry, -1 - d);
                 data[index(rx, ry, d)] = id(b.getMaterial().isAir() ? AIR : b);
             }
-        }
     }
 
     /** Format: MAGIC, palette size, palette (block states as text), then one palette id per cell. */
@@ -96,6 +95,12 @@ public final class Snapshot {
     }
 
     /** Reads a snapshot of normal depth (DEPTH). */
+    /** Rotates every block state of the palette (e.g. from the viewer's frame back into world orientation). */
+    void rotatePalette(StructureRotation rotation) {
+        if (rotation == StructureRotation.NONE) return;
+        palette.replaceAll(b -> b.getMaterial().isAir() ? b : rotated(b, rotation));
+    }
+
     static Snapshot read(byte[] bytes, Logger log) throws IOException {
         var s = new Snapshot();
         s.palette.clear();

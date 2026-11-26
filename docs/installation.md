@@ -107,9 +107,9 @@ Restart all servers.
 
 ## 6. Create the first portal pair
 
-1. Join the lobby, walk to where the portal should be and **look north**.
+1. Join the lobby, walk to where the portal should be and **look towards the spot** (the opening will face you).
 2. `/mp set survival Survival` – the portal appears 3 blocks in front of you.
-3. Join the survival server (e.g. `/server survival`), go to the spot for the way back, look north.
+3. Join the survival server (e.g. `/server survival`), go to the spot for the way back and look towards it.
 4. `/mp set lobby Lobby`
 5. Optional: `/mp style lobby rift` for the dimensional rift look.
 6. Back on the resource-pack server: `/mp update`.

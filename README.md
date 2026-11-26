@@ -63,7 +63,7 @@ Full walk-through: **[Installation](docs/installation.md)**.
 
 A portal always comes in **pairs**: lobby → survival *and* survival → lobby. Each one shows what lies in front of its counterpart.
 
-1. **Stand where the portal should be, looking north.** The portal is built 3 blocks in front of you with its opening facing south (towards you).
+1. **Stand where the portal should be and look in the direction it should stand.** The portal is built 3 blocks in front of you with its opening facing you – any of the four directions.
 2. On the lobby, run
    ```
    /mp set survival Survival
@@ -88,10 +88,10 @@ Run `/mp update` again whenever you add, move or remove portals, or after big bu
 
 ### Your own frame, any size – the Portal Wand
 
-1. Build your frame with an empty opening that faces **south** (players walk north into it). Any rectangle up to 7×7 blocks.
+1. Build your frame with an empty opening, in any of the four directions. Any rectangle up to 7×7 blocks.
 2. `/mp wand` gives you the Portal Wand (a glowing golden pickaxe).
 3. **Left-click** the block in one corner of the opening, **right-click** the opposite corner. A particle outline shows the marked area.
-4. `/mp set survival Survival` – the portal fills exactly that opening. No wall and no barriers are placed (`frame: none`), your build stays as it is.
+4. Stand **on the side players should walk in from** and run `/mp set survival Survival` – the portal fills exactly that opening and faces you. No wall and no barriers are placed (`frame: none`), your build stays as it is.
 5. `/mp update` on the resource-pack server.
 
 The two portals of a pair should have the same width, so the views line up. Rifts work the same way: `width`/`height` scale the crack and the area you can walk through.
@@ -104,7 +104,7 @@ All commands need `magicportals.admin` (default: op). Aliases: `/mp`, `/magicpor
 |---|---|
 | `/mp list` | Portals on this server: target, position, style, online state, scene number |
 | `/mp wand` | Get the Portal Wand to mark an opening of any size (left-click / right-click the two corners) |
-| `/mp set <server> [name]` | Create or move the portal to `<server>`: into the opening marked with the wand, otherwise 3 blocks north of you |
+| `/mp set <server> [name]` | Create or move the portal to `<server>`: into the opening marked with the wand (facing the side you stand on), otherwise 3 blocks in front of you (facing you) |
 | `/mp remove <server>` | Delete the portal to `<server>` |
 | `/mp style <server> <gate\|rift>` | Change the look of a portal |
 | `/mp update` | Bake all portal views and deliver the resource pack (pack server only) |

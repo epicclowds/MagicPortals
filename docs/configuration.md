@@ -76,14 +76,15 @@ One entry per portal on this server. The key is the **target server**.
 | `name` | target, capitalised | Label floating above the portal and used in messages. |
 | `style` | `gate` | `gate` – opening in a thick stone wall. `rift` – floating dimensional crack. |
 | `x`, `y`, `z` | auto | Position of the portal (see below). If missing, MagicPortals places the portal on flat ground near the world spawn and writes the coordinates back. |
+| `facing` | `south` | Direction the opening faces, i.e. the side players walk in from: `south`, `north`, `east` or `west`. `/mp set` fills this in for you. |
 | `frame.outer` | `STONE_BRICKS` | Outer wall blocks (style `gate`). Any block material. |
 | `frame.inner` | `POLISHED_BLACKSTONE_BRICKS` | Ring around the opening (style `gate`). |
 | `frame` | – | Set to `none` for no wall at all (you build the frame yourself). The Portal Wand sets this automatically. |
 | `width`, `height` | `3`, `3` | Size of the opening in blocks (1–7). For rifts it scales the crack and the walk-through area. |
 | `inside-view` | `false` | `true`: cameras (spectators, freecam, replays) that fly through the opening see the destination all around; invisible barriers behind the opening keep normal players out. `false`: the portal is flat from behind and nothing is placed behind it. |
 
-**Position and orientation.** Portals always face **south**: players approach from the south and walk north through the opening.
-`x y z` is the bottom centre block of the 3×3 opening; `y` is the block players stand in (one above the floor). The plane of the portal is the north face of row `z`. The easiest way to get it right is `/mp set <target>` while looking north – it places the portal 3 blocks in front of you.
+**Position and orientation.** `facing` is the side players come from: with `facing: south` they approach from the south and walk north through the opening; the portal is flat (or shows a nebula, for rifts) from the other side.
+`x y z` is the bottom centre block of the opening (for even widths the left one of the two middle blocks, seen from the front); `y` is the block players stand in (one above the floor). The portal plane is the back face of that block row. The easiest way to get it right is `/mp set <target>`: with a wand selection the opening faces the side you are standing on, without one the portal is placed 3 blocks in the direction you look, its opening facing you.
 
 What gets built:
 

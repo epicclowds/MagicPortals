@@ -312,7 +312,9 @@ void main() {
                      vec4(readData(8), readData(9), readData(10), readData(11)), vec4(readData(12), readData(13), readData(14), readData(15)));
     mat3 rotation = mat3(vec3(readData(16), readData(17), readData(18)), vec3(readData(20), readData(21), readData(22)), vec3(readData(24), readData(25), readData(26)));
     vec3 camera = vec3(readData(19), readData(23), readData(27));   // origin of view space, local
-    int scene = int(readData(28) + 0.5);
+    int sceneAndFacing = int(readData(28) + 0.5);
+    int scene = sceneAndFacing & 15;
+    int facing = sceneAndFacing >> 4;                   // 0 south, 1 west, 2 north, 3 east
     // marker code = 1 + style + 2*(no inside view) + 4*(width-1) + 32*(height-1)
     int code = int(readData(30) + 0.5) - 1;
     int style = code & 1;                               // 0 = gate, 1 = rift
@@ -337,6 +339,12 @@ void main() {
     vec4 b = invProj * vec4(ndc, 0.5, 1.0);
     vec3 eye = invRotation * eyeView + camera;
     vec3 d = normalize(invRotation * (b.xyz / b.w) + camera - eye);
+    // world axes → the portal's local frame (x along the opening, z towards the viewer side)
+    vec2 axisX = facing == 0 ? vec2(1.0, 0.0) : facing == 1 ? vec2(0.0, 1.0) : facing == 2 ? vec2(-1.0, 0.0) : vec2(0.0, -1.0);
+    vec2 axisZ = vec2(-axisX.y, axisX.x);
+    vec3 eyeWorld = eye;
+    eye =vec3(dot(eye.xz, axisX), eye.y, dot(eye.xz, axisZ));
+    d = vec3(dot(d.xz, axisX), d.y, dot(d.xz, axisZ));
 
     // Detect the depth range. Minecraft's near plane is 0.05; proj[3][2]/proj[2][2] is about
     // 2*0.05 for OpenGL (-1..1), 0.05 for 0..1 and very large for reversed depth.
@@ -344,7 +352,7 @@ void main() {
     bool openglDepth = ratio > 0.075 && ratio < 1.0;
     float rawDepth = texture(MainDepthSampler, texCoord).r;
     vec4 s = invProj * vec4(ndc, openglDepth ? rawDepth * 2.0 - 1.0 : rawDepth, 1.0);
-    float sceneDist = length(invRotation * (s.xyz / s.w) + camera - eye);
+    float sceneDist = length(invRotation * (s.xyz / s.w) + camera - eyeWorld);
 
     if (eye.z > 0.0 && style == 0) {
         // gate in a wall, seen from the front: only pixels whose ray hits the opening
