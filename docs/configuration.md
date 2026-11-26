@@ -174,7 +174,7 @@ portals:
 
 | Key | Default | Effect |
 |---|---|---|
-| `time` | `day` | `sunset`: orange sky and warm light. `night`: dark blue sky with stars; torches, lanterns, lava and other light sources glow (block light is baked into the scene). |
+| `time` | `day` | `sunset`: orange sky and warm light. `night`: dark blue sky with stars; torches, lanterns, lava and other light sources glow (block light is baked into the scene).  In worlds with a ceiling (Nether) the view switches to a **cave look** by itself: rock ceiling, warm red haze instead of sky, glowing lava. |
 | `fog` | `1` | `1`: no fog, only a light haze on distant land. `0`: crystal clear. Above `1` the destination fades into fog earlier (`8`: after a few blocks). |
 | `fog-color` | sky | Colour of the fog and the sky behind it – blue, red, green fog … |
 | `tint` / `tint-strength` | off / `0.5` | Colour filter over the view. |

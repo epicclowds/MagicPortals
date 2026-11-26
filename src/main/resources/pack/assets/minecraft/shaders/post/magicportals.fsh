@@ -18,6 +18,8 @@ uniform sampler2D PaletteSampler;
 uniform sampler2D AtlasSampler;
 uniform sampler2D FarColorSampler;
 uniform sampler2D FarHeightSampler;
+uniform sampler2D FarCeilingSampler;
+uniform sampler2D FarCeilingColorSampler;
 
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
@@ -82,6 +84,7 @@ float faceShade(int f) {
 int VIEW_TIME = 0;                    // 0 day, 1 sunset, 2 night
 float VIEW_FOG = 1.0;                 // fog density, 0 = none
 bool VIEW_FOG_CUSTOM = false;
+bool CAVE = false;                    // world with a ceiling (nether): rock ceiling and haze instead of sky
 vec3 VIEW_FOG_COLOR = vec3(0.0);
 vec3 VIEW_TINT = vec3(1.0);
 float VIEW_TINT_STRENGTH = 0.0;
@@ -105,6 +108,14 @@ void setView(int scene) {
     } else if (VIEW_TIME == 2) {
         SKY_HORIZON = vec3(0.05, 0.07, 0.15); SKY_ZENITH = vec3(0.01, 0.015, 0.045);
         SKY_SCALE = 0.3; SKY_LIGHT_COLOR = vec3(0.55, 0.65, 1.0);
+    }
+    CAVE = c.a > 0.5;
+    if (CAVE) {
+        // nether: no sky, a warm glowing haze; light comes from lava and fire, not from the sun
+        VIEW_TIME = 0;
+        SKY_HORIZON = vec3(0.32, 0.09, 0.05); SKY_ZENITH = vec3(0.14, 0.035, 0.025);
+        SKY_SCALE = 0.62; SKY_LIGHT_COLOR = vec3(1.0, 0.74, 0.58);
+        if (!VIEW_FOG_CUSTOM) { VIEW_FOG_CUSTOM = true; VIEW_FOG_COLOR = vec3(0.3, 0.085, 0.05); }
     }
 }
 
@@ -147,6 +158,7 @@ vec3 fogColor(vec3 d) {
 // the scene ends after DP_DB blocks, so that edge always fades out.
 float fog(float dist, vec3 d) {
     float back = d.z > 0.0 ? smoothstep(float(DP_DB) * 0.7, float(DP_DB) * 0.95, dist) * smoothstep(0.0, 0.5, d.z) : 0.0;
+    if (CAVE && VIEW_FOG <= 1.0) return max(back, smoothstep(24.0, 230.0, dist) * 0.85 * max(VIEW_FOG, 0.3));   // nether haze
     if (VIEW_FOG <= 1.0) return back;
     float end = 300.0 / VIEW_FOG;
     return max(back, smoothstep(end * 0.1, end, dist));
@@ -205,39 +217,78 @@ float farHeight(vec3 p, int scene) {
     return mix(mix(h00, h10, f.x), mix(h01, h11, f.x), f.y);
 }
 
+// Ceiling of cave worlds (nether), like farHeight; +1e4 where there is none.
+float farCeilingTexel(int c, int r, int scene) {
+    if (c < 0 || r < 0 || c >= DP_FAR_COLUMNS || r >= DP_FAR_ROWS) return 1e4;
+    vec4 t = texelFetch(FarCeilingSampler, ivec2(c, r + scene * DP_FAR_ROWS), 0);
+    if ((byte8(t.b) & 1) == 0) return 1e4;
+    return float(byte8(t.r) * 256 + byte8(t.g)) - 2048.0;
+}
+
+float farCeiling(vec3 p, int scene) {
+    if (!CAVE) return 1e4;
+    vec2 g = farCell(p), b = floor(g), f = g - b;
+    ivec2 i = ivec2(b);
+    float h00 = farCeilingTexel(i.x, i.y, scene), h10 = farCeilingTexel(i.x + 1, i.y, scene);
+    float h01 = farCeilingTexel(i.x, i.y + 1, scene), h11 = farCeilingTexel(i.x + 1, i.y + 1, scene);
+    float known = min(min(h00, h10), min(h01, h11));
+    if (known > 1e3) return 1e4;
+    h00 = h00 > 1e3 ? known : h00; h10 = h10 > 1e3 ? known : h10;
+    h01 = h01 > 1e3 ? known : h01; h11 = h11 > 1e3 ? known : h11;
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(h00, h10, f.x), mix(h01, h11, f.x), f.y);
+}
+
+bool farSolid(vec3 p, int scene) { return p.y < farHeight(p, scene) || p.y > farCeiling(p, scene); }
+
+vec2 farUV(vec3 p, int scene) {
+    vec2 g = farCell(p);
+    return vec2((g.x + 0.5) / float(DP_FAR_COLUMNS), (g.y + 0.5 + float(scene * DP_FAR_ROWS)) / float(DP_FAR_ROWS * DP_SCENES));
+}
+
 vec3 farView(vec3 p0, vec3 d, int scene, float tBefore) {
     float maxDepth = float(DP_FAR_ROWS) * DP_FAR_STEP;
     float t = 0.0, prevT = 0.0;
     for (int n = 0; n < 220; n++) {
         vec3 p = p0 + d * t;
         if (-p.z > maxDepth || p.z > 1.0 || p.y > 330.0) break;
-        if (p.y < farHeight(p, scene)) {
+        if (farSolid(p, scene)) {
             float a = prevT, b = t;
             for (int k = 0; k < 6; k++) {
                 float m = 0.5 * (a + b);
-                vec3 q = p0 + d * m;
-                if (q.y < farHeight(q, scene)) b = m; else a = m;
+                if (farSolid(p0 + d * m, scene)) b = m; else a = m;
             }
             vec3 q = p0 + d * b;
-            vec2 g = farCell(q);
-            vec3 color = texture(FarColorSampler, vec2((g.x + 0.5) / float(DP_FAR_COLUMNS),
-                    (g.y + 0.5 + float(scene * DP_FAR_ROWS)) / float(DP_FAR_ROWS * DP_SCENES))).rgb;
+            float floorH = farHeight(q, scene), ceilH = farCeiling(q, scene);
+            bool roof = abs(q.y - ceilH) < abs(q.y - floorH);
             float e = 1.5;
-            float hx = farHeight(q + vec3(e, 0.0, 0.0), scene) - farHeight(q - vec3(e, 0.0, 0.0), scene);
-            float hz = farHeight(q + vec3(0.0, 0.0, e), scene) - farHeight(q - vec3(0.0, 0.0, e), scene);
-            vec3 normal = abs(hx) > 500.0 || abs(hz) > 500.0 ? vec3(0.0, 1.0, 0.0) : normalize(vec3(-hx, 2.0 * e, -hz));
-            float shade = 0.6 + 0.4 * max(dot(normal, normalize(vec3(0.35, 0.85, 0.4))), 0.0);
-            color *= shade * SKY_LIGHT_COLOR * lightFactor(15.0 * SKY_SCALE);
+            vec3 color;
+            if (roof) {
+                // rock ceiling, lit warmly from below
+                color = texture(FarCeilingColorSampler, farUV(q, scene)).rgb;
+                float hx = farCeiling(q + vec3(e, 0.0, 0.0), scene) - farCeiling(q - vec3(e, 0.0, 0.0), scene);
+                float hz = farCeiling(q + vec3(0.0, 0.0, e), scene) - farCeiling(q - vec3(0.0, 0.0, e), scene);
+                vec3 normal = abs(hx) > 500.0 || abs(hz) > 500.0 ? vec3(0.0, -1.0, 0.0) : normalize(vec3(hx, -2.0 * e, hz));
+                color *= (0.45 + 0.3 * max(dot(normal, normalize(vec3(-0.3, -0.8, -0.3))), 0.0)) * SKY_LIGHT_COLOR;
+            } else {
+                color = texture(FarColorSampler, farUV(q, scene)).rgb;
+                float hx = farHeight(q + vec3(e, 0.0, 0.0), scene) - farHeight(q - vec3(e, 0.0, 0.0), scene);
+                float hz = farHeight(q + vec3(0.0, 0.0, e), scene) - farHeight(q - vec3(0.0, 0.0, e), scene);
+                vec3 normal = abs(hx) > 500.0 || abs(hz) > 500.0 ? vec3(0.0, 1.0, 0.0) : normalize(vec3(-hx, 2.0 * e, -hz));
+                bool lava = color.r > 0.7 && color.g > 0.2 && color.b < 0.2;   // glows by itself
+                if (lava) color *= 1.25;
+                else color *= (0.6 + 0.4 * max(dot(normal, normalize(vec3(0.35, 0.85, 0.4))), 0.0)) * SKY_LIGHT_COLOR * lightFactor(15.0 * SKY_SCALE);
+            }
             float dist = tBefore + b;
             MARCH_T = dist;
             // aerial perspective: distant land takes on a little of the sky colour
-            color = mix(color, sky(d), smoothstep(30.0, maxDepth * 1.4, dist) * 0.5 * min(VIEW_FOG, 1.0));
+            if (!CAVE) color = mix(color, sky(d), smoothstep(30.0, maxDepth * 1.4, dist) * 0.5 * min(VIEW_FOG, 1.0));
             return mix(color, fogColor(d), fog(dist, d));
         }
         prevT = t;
         t += max(0.3, (tBefore + t) * 0.012);
     }
-    return sky(d);
+    return CAVE ? fogColor(d) : sky(d);
 }
 
 

@@ -293,25 +293,48 @@ public final class Portal {
         return java.util.concurrent.CompletableFuture.allOf(chunks.values().toArray(new java.util.concurrent.CompletableFuture[0]))
                 .thenApplyAsync(ignored -> {
                     var far = new FarTerrain();
+                    far.cave = ceiling;
+                    // nether: only up to the bedrock roof (logical height), not the empty space above it
+                    int maxY = Math.min(world.getMaxHeight(), world.getMinHeight() + world.getLogicalHeight()) - 1;
                     for (int i = 0; i < wx.length; i++) {
                         ChunkSnapshot s = chunks.get(((long) (wx[i] >> 4) << 32) | ((wz[i] >> 4) & 0xFFFFFFFFL)).join();
                         if (s == null) continue;
-                        int bx = wx[i] & 15, bz = wz[i] & 15;
-                        // worlds with a ceiling (nether): search down from above the portal, else from the surface
-                        int yy = ceiling ? top : Math.min(s.getHighestBlockYAt(bx, bz), top + 200);
-                        boolean airAbove = !ceiling;
-                        for (; yy >= bottom; yy--) {
-                            BlockData b = s.getBlockData(bx, yy, bz);
-                            Material m = b.getMaterial();
-                            boolean empty = m.isAir() || m == Material.BARRIER || m == Material.LIGHT;
-                            if (empty) { airAbove = true; continue; }
-                            if (!airAbove) continue;
-                            far.set(i % FarTerrain.COLUMNS, i / FarTerrain.COLUMNS, yy + 1 - y, b.getAsString());
-                            break;
+                        int bx = wx[i] & 15, bz = wz[i] & 15, c = i % FarTerrain.COLUMNS, r = i / FarTerrain.COLUMNS;
+                        if (!ceiling) {
+                            // open sky: the surface is the highest block
+                            for (int yy = Math.min(s.getHighestBlockYAt(bx, bz), top + 200); yy >= bottom; yy--) {
+                                BlockData b = s.getBlockData(bx, yy, bz);
+                                if (empty(b)) continue;
+                                far.set(c, r, yy + 1 - y, b.getAsString());
+                                break;
+                            }
+                            continue;
                         }
+                        // cave world (nether): the floor and the ceiling of the cave around the portal's eye height;
+                        // a column that is solid there becomes a pillar up to the next open space
+                        int eye = Math.max(bottom, Math.min(maxY, y + 2));
+                        int floorTop;
+                        if (empty(s.getBlockData(bx, eye, bz))) {
+                            int yy = eye;
+                            while (yy > bottom && empty(s.getBlockData(bx, yy - 1, bz))) yy--;
+                            floorTop = yy;   // first empty block above the floor
+                        } else {
+                            int yy = eye;
+                            while (yy < maxY && !empty(s.getBlockData(bx, yy + 1, bz))) yy++;
+                            floorTop = yy + 1;
+                        }
+                        if (floorTop - 1 >= bottom) far.set(c, r, floorTop - y, s.getBlockData(bx, floorTop - 1, bz).getAsString());
+                        int yy = floorTop;
+                        while (yy <= maxY && empty(s.getBlockData(bx, yy, bz))) yy++;
+                        if (yy <= maxY) far.setCeiling(c, r, yy - y, s.getBlockData(bx, yy, bz).getAsString());
                     }
                     return far;
                 });
+    }
+
+    private static boolean empty(BlockData b) {
+        Material m = b.getMaterial();
+        return m.isAir() || m == Material.BARRIER || m == Material.LIGHT;
     }
 
     /** Version of the other side's view currently used by the fallback blocks. */

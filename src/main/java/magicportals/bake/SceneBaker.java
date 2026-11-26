@@ -65,6 +65,8 @@ public final class SceneBaker {
                 try { fars.add(Files.exists(far) ? FarTerrain.read(Files.readAllBytes(far)) : new FarTerrain()); }
                 catch (IOException e) { log.accept("  ! far terrain of " + key + ": " + e.getMessage()); fars.add(new FarTerrain()); }
             }
+            // worlds with a ceiling get the cave look (rock ceiling, nether haze) automatically
+            for (int s = 0; s < fars.size(); s++) views.get(s)[11] = fars.get(s).cave ? 1 : 0;
             baker.write(scenes, views, fars, output);
         }
         log.accept("Scenes: " + String.join(", ", keys));
@@ -515,6 +517,8 @@ public final class SceneBaker {
         // far terrain first: its top blocks may add shapes and textures
         BufferedImage farColor = new BufferedImage(FarTerrain.COLUMNS, FarTerrain.ROWS * scenes.size(), BufferedImage.TYPE_INT_ARGB);
         BufferedImage farHeight = new BufferedImage(FarTerrain.COLUMNS, FarTerrain.ROWS * scenes.size(), BufferedImage.TYPE_INT_ARGB);
+        BufferedImage farCeiling = new BufferedImage(FarTerrain.COLUMNS, FarTerrain.ROWS * scenes.size(), BufferedImage.TYPE_INT_ARGB);
+        BufferedImage farCeilingColor = new BufferedImage(FarTerrain.COLUMNS, FarTerrain.ROWS * scenes.size(), BufferedImage.TYPE_INT_ARGB);
         for (int s = 0; s < fars.size(); s++) {
             FarTerrain far = fars.get(s);
             int[] colors = new int[far.palette.size()];
@@ -525,6 +529,10 @@ public final class SceneBaker {
                 int h = exists ? far.height[i] + 2048 : 0;
                 farHeight.setRGB(c, py, 0xFF000000 | ((h >> 8) & 255) << 16 | (h & 255) << 8 | (exists ? 1 : 0));
                 farColor.setRGB(c, py, 0xFF000000 | (exists ? colors[far.block[i]] : 0x808080));
+                boolean roof = far.ceiling[i] != FarTerrain.NONE && colors[far.ceilingBlock[i]] >= 0;
+                int ch = roof ? far.ceiling[i] + 2048 : 0;
+                farCeiling.setRGB(c, py, 0xFF000000 | ((ch >> 8) & 255) << 16 | (ch & 255) << 8 | (roof ? 1 : 0));
+                farCeilingColor.setRGB(c, py, 0xFF000000 | (roof ? colors[far.ceilingBlock[i]] : 0x401010));
             }
         }
         int count = scenes.size();
@@ -569,6 +577,8 @@ public final class SceneBaker {
         ImageIO.write(atlas, "png", textures.resolve("atlas.png").toFile());
         ImageIO.write(farColor, "png", textures.resolve("farcolor.png").toFile());
         ImageIO.write(farHeight, "png", textures.resolve("farheight.png").toFile());
+        ImageIO.write(farCeiling, "png", textures.resolve("farceiling.png").toFile());
+        ImageIO.write(farCeilingColor, "png", textures.resolve("farceilingcolor.png").toFile());
 
         Path include = output.resolve("assets/minecraft/shaders/include");
         Files.createDirectories(include);
@@ -591,7 +601,7 @@ public final class SceneBaker {
                 #define DP_FAR_STEP %d.0
                 #define DP_HORIZON vec3(0.75, 0.85, 1.0)
                 #define DP_ZENITH vec3(0.47, 0.65, 1.0)
-                // per scene: (time, fog, weather, tint strength), (tint rgb, custom fog), (fog rgb, 0)
+                // per scene: (time, fog, weather, tint strength), (tint rgb, custom fog), (fog rgb, cave)
                 const vec4 DP_VIEW[%d] = vec4[](%s);
                 #endif
                 """.formatted(W, H, D, DB, DT, HB, RX0, GY0, count, ATLAS_COLUMNS, FarTerrain.COLUMNS, FarTerrain.ROWS, FarTerrain.STEP, count * 3, viewArray(views)));
@@ -621,7 +631,9 @@ public final class SceneBaker {
                                 { "sampler_name": "Palette", "location": "minecraft:magicportals/palette", "width": %d, "height": %d, "bilinear": false },
                                 { "sampler_name": "Atlas", "location": "minecraft:magicportals/atlas", "width": %d, "height": %d, "bilinear": false },
                                 { "sampler_name": "FarColor", "location": "minecraft:magicportals/farcolor", "width": %d, "height": %d, "bilinear": true },
-                                { "sampler_name": "FarHeight", "location": "minecraft:magicportals/farheight", "width": %d, "height": %d, "bilinear": false }
+                                { "sampler_name": "FarHeight", "location": "minecraft:magicportals/farheight", "width": %d, "height": %d, "bilinear": false },
+                                { "sampler_name": "FarCeiling", "location": "minecraft:magicportals/farceiling", "width": %d, "height": %d, "bilinear": false },
+                                { "sampler_name": "FarCeilingColor", "location": "minecraft:magicportals/farceilingcolor", "width": %d, "height": %d, "bilinear": true }
                             ],
                             "output": "mp_image"
                         },
@@ -668,6 +680,6 @@ public final class SceneBaker {
                     ]
                 }
                 """.formatted(voxelWidth, voxelHeight, PALETTE_WIDTH, paletteHeight, ATLAS_SIZE, ATLAS_SIZE,
-                        FarTerrain.COLUMNS, farHeight, FarTerrain.COLUMNS, farHeight);
+                        FarTerrain.COLUMNS, farHeight, FarTerrain.COLUMNS, farHeight, FarTerrain.COLUMNS, farHeight, FarTerrain.COLUMNS, farHeight);
     }
 }
