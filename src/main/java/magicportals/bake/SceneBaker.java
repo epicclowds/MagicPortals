@@ -65,8 +65,8 @@ public final class SceneBaker {
                 try { fars.add(Files.exists(far) ? FarTerrain.read(Files.readAllBytes(far)) : new FarTerrain()); }
                 catch (IOException e) { log.accept("  ! far terrain of " + key + ": " + e.getMessage()); fars.add(new FarTerrain()); }
             }
-            // worlds with a ceiling get the cave look (rock ceiling, nether haze) automatically
-            for (int s = 0; s < fars.size(); s++) views.get(s)[11] = fars.get(s).cave ? 1 : 0;
+            // worlds with a ceiling get the cave look (rock ceiling, nether haze), the End its own sky – automatically
+            for (int s = 0; s < fars.size(); s++) views.get(s)[11] = fars.get(s).cave ? 1 : fars.get(s).end ? 2 : 0;
             baker.write(scenes, views, fars, output);
         }
         log.accept("Scenes: " + String.join(", ", keys));

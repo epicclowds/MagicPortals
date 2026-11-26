@@ -23,7 +23,7 @@ The snapshot is rotated by 180° so it fits the viewer on the other side, serial
 
 Up to 16 scenes share these textures; `magicportals_scene.glsl` tells the shader their size and count.
 
-**Far terrain.** Every 5 minutes each server also records a coarse heightmap in front of its portals – surface height and top block for every 2×2 column, 256 blocks wide, 240 deep in front and 80 behind the portal (for cameras inside looking back) – from chunks that are already generated (loaded asynchronously, never generated). In worlds with a ceiling (Nether) it records the floor and the ceiling of the cave around eye height; the shader then draws the rock ceiling and a red haze instead of sky. The baker turns it into two small textures (average top-face colour, height). Rays that leave the detailed block grid continue over this heightfield; the smooth interpolation makes distant land look soft, like a depth-of-field blur.
+**Far terrain.** Every 5 minutes each server also records a coarse heightmap in front of its portals – surface height and top block for every 2×2 column, 256 blocks wide, 240 deep in front and 80 behind the portal (for cameras inside looking back) – from chunks that are already generated (loaded asynchronously, never generated). In worlds with a ceiling (Nether) it records the floor and the ceiling of the cave around eye height; the shader then draws the rock ceiling and a red haze instead of sky. The baker turns it into small textures (average top-face colour, height, ceiling). Rays that leave the detailed block grid continue cell by cell over these 2×2 block columns, so distant land looks like Minecraft blocks; the depth-of-field pass blurs it.
 
 ## 3. The marker
 

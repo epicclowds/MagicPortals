@@ -294,6 +294,7 @@ public final class Portal {
                 .thenApplyAsync(ignored -> {
                     var far = new FarTerrain();
                     far.cave = ceiling;
+                    far.end = world.getEnvironment() == World.Environment.THE_END;
                     // nether: only up to the bedrock roof (logical height), not the empty space above it
                     int maxY = Math.min(world.getMaxHeight(), world.getMinHeight() + world.getLogicalHeight()) - 1;
                     for (int i = 0; i < wx.length; i++) {

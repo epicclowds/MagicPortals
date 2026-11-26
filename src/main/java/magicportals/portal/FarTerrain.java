@@ -21,6 +21,8 @@ public final class FarTerrain {
 
     /** The world has a ceiling: the view gets a rock ceiling and nether haze instead of sky. */
     public boolean cave;
+    /** The End: dark purple sky, void below. */
+    public boolean end;
     public final short[] height = new short[COLUMNS * TOTAL_ROWS], block = new short[COLUMNS * TOTAL_ROWS];
     public final short[] ceiling = new short[COLUMNS * TOTAL_ROWS], ceilingBlock = new short[COLUMNS * TOTAL_ROWS];
     public final List<String> palette = new ArrayList<>();
@@ -50,7 +52,7 @@ public final class FarTerrain {
         var buffer = new ByteArrayOutputStream(COLUMNS * TOTAL_ROWS * 8 + 4096);
         try (var out = new DataOutputStream(buffer)) {
             out.writeInt(MAGIC);
-            out.writeBoolean(cave);
+            out.writeByte((cave ? 1 : 0) | (end ? 2 : 0));
             out.writeInt(palette.size());
             for (String s : palette) { byte[] b = s.getBytes(StandardCharsets.UTF_8); out.writeShort(b.length); out.write(b); }
             for (int i = 0; i < height.length; i++) {
@@ -66,7 +68,9 @@ public final class FarTerrain {
             int magic = in.readInt();
             if (magic != MAGIC) throw new IOException(magic == OLD_MAGIC ? "old format, will be recaptured" : "Invalid far terrain");
             boolean withCeiling = true;
-            if (withCeiling) far.cave = in.readBoolean();
+            int mode = in.readByte();
+            far.cave = (mode & 1) != 0;
+            far.end = (mode & 2) != 0;
             int n = in.readInt();
             for (int i = 0; i < n; i++) {
                 byte[] raw = new byte[in.readUnsignedShort()];
