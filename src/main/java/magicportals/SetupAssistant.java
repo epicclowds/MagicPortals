@@ -76,14 +76,9 @@ final class SetupAssistant {
     private Component run(String label, String command) { return button(label, command, NamedTextColor.GREEN, true); }
 
     private Component footer(boolean back) {
-        Component c = Component.text("  ");
+        Component c = Component.empty();
         if (back) c = c.append(button(msg("setup.btn.back"), "/mp setup back", NamedTextColor.YELLOW, true)).append(Component.text("  "));
         return c.append(button(msg("setup.btn.cancel"), "/mp setup cancel", NamedTextColor.RED, true));
-    }
-
-    private void title(Player p) {
-        p.sendMessage(Component.empty());
-        p.sendMessage(Component.text("✦ " + msg("setup.title") + " ✦", NamedTextColor.LIGHT_PURPLE, TextDecoration.BOLD));
     }
 
     // ---------- commands ----------
@@ -185,62 +180,128 @@ final class SetupAssistant {
     // ---------- steps ----------
 
     private void show(Player p, State s) {
-        title(p);
+        var lines = new ArrayList<Component>();
+        int step = 0;
         switch (s.step) {
             case "mark" -> {
-                p.sendMessage(Component.text(msg("setup.step1"), NamedTextColor.WHITE));
-                p.sendMessage(footer(false));
+                step = 1;
+                lines.addAll(wrap(msg("setup.step1")));
+                lines.add(Component.empty());
+                lines.add(footer(false));
             }
             case "target" -> {
-                p.sendMessage(Component.text(msg("setup.step2"), NamedTextColor.WHITE));
+                step = 2;
+                lines.addAll(wrap(msg("setup.step2")));
+                lines.add(Component.empty());
                 var servers = plugin.knownServers();
                 if (servers.isEmpty()) {
-                    p.sendMessage(Component.text(msg("setup.noservers") + " ", NamedTextColor.GRAY).append(run(msg("setup.btn.retry"), "/mp setup show")));
+                    lines.addAll(wrap(msg("setup.noservers")));
+                    lines.add(run(msg("setup.btn.retry"), "/mp setup show"));
                 } else {
-                    Component line = Component.text("  ");
+                    Component line = Component.empty();
                     for (String server : servers) line = line.append(run("[" + server + "]", "/mp setup target " + server)).append(Component.text("  "));
-                    p.sendMessage(line);
+                    lines.add(line);
                 }
-                p.sendMessage(footer(true));
+                lines.add(Component.empty());
+                lines.add(footer(true));
             }
             case "name" -> {
+                step = 3;
                 if (s.name == null) s.name = uniqueName(s.target);
                 if (s.link == null) s.link = uniqueLink(s.origin + "-" + s.target);
-                p.sendMessage(Component.text(msg("setup.step3", s.target), NamedTextColor.WHITE));
-                p.sendMessage(Component.text("  " + msg("setup.suggestion", s.name, s.link), NamedTextColor.AQUA));
+                lines.addAll(wrap(msg("setup.step3", s.target)));
+                lines.add(Component.empty());
+                lines.add(Component.text(msg("setup.label.name") + "  ", NamedTextColor.GRAY).append(Component.text(s.name, NamedTextColor.WHITE, TextDecoration.BOLD)));
+                lines.add(Component.text(msg("setup.label.id") + "  ", NamedTextColor.GRAY).append(Component.text(s.link, NamedTextColor.WHITE, TextDecoration.BOLD)));
+                lines.add(Component.empty());
                 String cmd = "/mp setup name " + s.name + " " + s.link;
-                p.sendMessage(Component.text("  ").append(run(msg("setup.btn.accept"), cmd)).append(Component.text("  "))
-                        .append(button(msg("setup.btn.edit"), cmd, NamedTextColor.AQUA, false)));
-                p.sendMessage(footer(true));
+                lines.add(run(msg("setup.btn.accept"), cmd).append(Component.text("  ")).append(button(msg("setup.btn.edit"), cmd, NamedTextColor.AQUA, false)));
+                lines.add(footer(true));
             }
             case "style" -> {
-                p.sendMessage(Component.text(msg("setup.step4"), NamedTextColor.WHITE));
-                Component styles = Component.text("  ");
+                step = 4;
+                lines.addAll(wrap(msg("setup.step4")));
+                lines.add(Component.empty());
+                Component styles = Component.empty();
+                int n = 0;
                 for (String id : Style.ids()) {
                     boolean chosen = id.equals(s.style);
                     styles = styles.append(button((chosen ? "● " : "○ ") + msg("style." + id), "/mp setup style " + id,
-                            chosen ? NamedTextColor.GOLD : NamedTextColor.GRAY, true)).append(Component.text("  "));
+                            chosen ? NamedTextColor.GOLD : NamedTextColor.GRAY, true)).append(Component.text("   "));
+                    if (++n % 3 == 0) { lines.add(styles); styles = Component.empty(); }
                 }
-                p.sendMessage(styles);
-                p.sendMessage(Component.text("  ")
-                        .append(button(msg("setup.btn.sound", msg(s.sound ? "setup.on" : "setup.off")), "/mp setup sound", s.sound ? NamedTextColor.GREEN : NamedTextColor.GRAY, true))
-                        .append(Component.text("  "))
+                if (n % 3 != 0) lines.add(styles);
+                lines.add(Component.empty());
+                lines.add(button(msg("setup.btn.sound", msg(s.sound ? "setup.on" : "setup.off")), "/mp setup sound", s.sound ? NamedTextColor.GREEN : NamedTextColor.GRAY, true)
+                        .append(Component.text("   "))
                         .append(button(msg("setup.btn.effects", msg(s.effects ? "setup.on" : "setup.off")), "/mp setup effects", s.effects ? NamedTextColor.GREEN : NamedTextColor.GRAY, true)));
-                p.sendMessage(Component.text("  ").append(run(msg("setup.btn.next"), "/mp setup next")));
-                p.sendMessage(footer(true));
+                lines.add(Component.empty());
+                lines.add(run(msg("setup.btn.next"), "/mp setup next"));
+                lines.add(footer(true));
             }
             case "travel" -> {
-                p.sendMessage(Component.text(msg("setup.created", s.name, s.target), NamedTextColor.WHITE));
-                p.sendMessage(Component.text("  ").append(run(msg("setup.btn.go", s.target), "/mp setup go")));
-                p.sendMessage(footer(false));
+                step = 5;
+                lines.addAll(wrap(msg("setup.created", s.name, s.target)));
+                lines.add(Component.empty());
+                lines.add(run(msg("setup.btn.go", s.target), "/mp setup go"));
+                lines.add(footer(false));
             }
             case "counter" -> {
-                p.sendMessage(Component.text(msg("setup.arrived", s.target, s.origin, s.link), NamedTextColor.WHITE));
-                if (hasSelection(p)) p.sendMessage(Component.text("  " + msg("setup.ready") + " ", NamedTextColor.AQUA).append(run(msg("setup.btn.create"), "/mp setup create")));
-                p.sendMessage(footer(false));
+                step = 5;
+                lines.addAll(wrap(msg("setup.arrived", s.target, s.origin, s.link)));
+                lines.add(Component.empty());
+                if (hasSelection(p)) {
+                    lines.addAll(wrap(msg("setup.ready")));
+                    lines.add(run(msg("setup.btn.create"), "/mp setup create"));
+                }
+                lines.add(footer(false));
             }
-            default -> p.sendMessage(footer(false));
+            default -> lines.add(footer(false));
         }
+        box(p, step, lines);
+    }
+
+    private static final Component RULE = Component.text(" ".repeat(80), NamedTextColor.DARK_GRAY, TextDecoration.STRIKETHROUGH);
+
+    /**
+     * Sends one framed setup message:
+     *  ───────────────
+     *        MagicPortals SETUP
+     *    Step 2/5
+     *   text …
+     *  ───────────────
+     */
+    private void box(Player p, int step, List<Component> lines) {
+        p.sendMessage(RULE);
+        p.sendMessage(Component.empty());
+        p.sendMessage(Component.text(" ".repeat(20)).append(Component.text(msg("setup.title"), NamedTextColor.DARK_PURPLE, TextDecoration.BOLD)));
+        p.sendMessage(Component.empty());
+        if (step > 0) {
+            p.sendMessage(Component.text("   ").append(Component.text(msg("setup.step") + " ", NamedTextColor.GRAY, TextDecoration.BOLD))
+                    .append(Component.text(step, NamedTextColor.GRAY)).append(Component.text("/", NamedTextColor.GRAY, TextDecoration.BOLD))
+                    .append(Component.text("5", NamedTextColor.GRAY, TextDecoration.BOLD)));
+        } else {
+            p.sendMessage(Component.text("   ").append(Component.text(msg("setup.finished"), NamedTextColor.GREEN, TextDecoration.BOLD)));
+        }
+        p.sendMessage(Component.empty());
+        for (Component line : lines) p.sendMessage(Component.text(" ").append(line));
+        p.sendMessage(Component.empty());
+        p.sendMessage(RULE);
+    }
+
+    /** Splits a text into short grey chat lines (about 50 characters, at sentence and word boundaries). */
+    private static List<Component> wrap(String text) {
+        var lines = new ArrayList<Component>();
+        for (String sentence : text.split("(?<=[.!?:])\s+(?=[A-ZÄÖÜ(])")) {
+            var line = new StringBuilder();
+            for (String word : sentence.split(" ")) {
+                if (line.length() > 0 && line.length() + word.length() > 50) { lines.add(Component.text(line.toString(), NamedTextColor.GRAY)); line.setLength(0); }
+                if (line.length() > 0) line.append(' ');
+                line.append(word);
+            }
+            if (line.length() > 0) lines.add(Component.text(line.toString(), NamedTextColor.GRAY));
+        }
+        return lines;
     }
 
     private boolean hasSelection(Player p) {
@@ -271,8 +332,7 @@ final class SetupAssistant {
         String key = key(p.getUniqueId());
         plugin.runAsync(ex -> { ex.deleteSnapshots(key); return null; });
         plugin.requestUpdate();
-        title(p);
-        p.sendMessage(Component.text(msg("setup.done", s.origin, s.target, s.link), NamedTextColor.GREEN));
+        box(p, 0, wrap(msg("setup.done", s.origin, s.target, s.link)));
     }
 
     private void applyOptions(State s, String portal) {
