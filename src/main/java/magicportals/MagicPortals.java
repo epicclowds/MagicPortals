@@ -277,6 +277,8 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                 String s = sounds.getString(slot);
                 if (s != null && !s.isBlank()) portal.customSounds.put(slot, s.trim().toLowerCase(Locale.ROOT));
             }
+            // per portal, default from the global setting
+            portal.fallback = p.getBoolean("fallback-blocks", c.getBoolean("fallback-blocks", false));
             portals.add(portal);
         }
         // the view settings belong to the scene this portal shows, i.e. the snapshot "<target>@<server>"
@@ -342,11 +344,11 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
     private void sync() {
         if (syncing) return;
         syncing = true;
-        boolean fallback = getConfig().getBoolean("fallback-blocks", false);
+        boolean fallback = portals.stream().anyMatch(p -> p.fallback);
         boolean packServer = pack.enabled();
         long knownScenes = scenesVersion;
         var knownRemote = new HashMap<String, Long>();
-        for (Portal p : portals) knownRemote.put(p.sceneKey(server), p.remoteVersion());
+        for (Portal p : portals) if (p.fallback) knownRemote.put(p.sceneKey(server), p.remoteVersion());
         String self = server;
         var ex = exchange;
         Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
@@ -396,8 +398,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         if (tick % 1200 == 600) for (Portal p : portals) p.startCapture();
         if (tick == 900 && ++farMinutes % 5 == 0) for (Portal p : portals) saveFar(p);
         for (Portal p : portals) { var done = p.captureStep(server); if (done != null) save(done); }
-        if (tick % 2 == 0 && getConfig().getBoolean("fallback-blocks", false))
-            for (Player player : Bukkit.getOnlinePlayers()) for (Portal p : portals) p.updateFallback(player, tick);
+        if (tick % 2 == 0) for (Portal p : portals) if (p.fallback) for (Player player : Bukkit.getOnlinePlayers()) p.updateFallback(player, tick);
         if (tick % 4 == 0) for (Portal p : portals) p.particles();
         tick = (tick + 1) % 1200;
     }
@@ -787,6 +788,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         EDITABLE.put("volume", List.of("0.25", "0.5", "1", "1.5", "2"));
         EDITABLE.put("particles", List.of("0", "0.5", "1", "2", "3", "5"));
         EDITABLE.put("effects", List.of("true", "false"));
+        EDITABLE.put("fallback-blocks", List.of("true", "false"));
         EDITABLE.put("frame", List.of("none", "wall"));
         // the view through the portal (needs /mp update)
         EDITABLE.put("time", List.of("day", "sunset", "night"));
@@ -859,6 +861,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                     case "volume" -> c.getDouble(path + ".volume", 1.0);
                     case "particles" -> c.getDouble(path + ".particles", 1.0);
                     case "effects" -> c.getBoolean(path + ".effects", false);
+                    case "fallback-blocks" -> c.getBoolean(path + ".fallback-blocks", c.getBoolean("fallback-blocks", false));
                     case "time" -> c.getString(path + ".view.time", "day");
                     case "fog" -> c.getDouble(path + ".view.fog", 1.0);
                     case "fog-color" -> c.getString(path + ".view.fog-color", "none");
@@ -918,7 +921,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                 try { n = Integer.parseInt(value); } catch (NumberFormatException e) { n = 0; }
                 stored = n >= 1 && n <= Portal.MAX_SIZE ? n : null;
             }
-            case "inside-view", "barriers", "label", "sound", "effects" -> stored = switch (value) { case "true", "on", "yes", "an", "ja" -> true; case "false", "off", "no", "aus", "nein" -> false; default -> null; };
+            case "inside-view", "barriers", "label", "sound", "effects", "fallback-blocks" -> stored = switch (value) { case "true", "on", "yes", "an", "ja" -> true; case "false", "off", "no", "aus", "nein" -> false; default -> null; };
             default -> stored = value.equals("none") ? "none" : value.equals("wall") ? "wall" : null;
         }
         if (stored == null) { sender.sendMessage(error("edit.invalid", raw, key, String.join(", ", EDITABLE.get(key)))); return; }

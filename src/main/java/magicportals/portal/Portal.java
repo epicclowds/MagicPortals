@@ -496,6 +496,9 @@ public final class Portal {
     /** Custom sounds per slot ("none" = silent), set by the plugin from the config. */
     public final Map<String, String> customSounds = new HashMap<>();
 
+    /** Send the destination as client-side blocks too (for players without the shader); option "fallback-blocks". */
+    public boolean fallback;
+
     /**
      * Plays the sound of a slot if sounds are enabled for this portal, scaled by its volume. A custom sound
      * replaces the built-in one and plays at full volume and normal pitch.
