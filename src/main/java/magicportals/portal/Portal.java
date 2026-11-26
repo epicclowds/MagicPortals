@@ -269,6 +269,51 @@ public final class Portal {
         return done;
     }
 
+    /**
+     * Captures the far terrain in front of this portal (see {@link FarTerrain}). Chunks are loaded
+     * asynchronously and only if they were generated already; the heights are computed off the main thread.
+     * Must be called on the main thread.
+     */
+    public java.util.concurrent.CompletableFuture<FarTerrain> captureFar() {
+        int columns = FarTerrain.COLUMNS, rows = FarTerrain.ROWS, step = FarTerrain.STEP;
+        int[] wx = new int[columns * rows], wz = new int[columns * rows];
+        var chunks = new HashMap<Long, java.util.concurrent.CompletableFuture<ChunkSnapshot>>();
+        for (int r = 0; r < rows; r++) for (int c = 0; c < columns; c++) {
+            int rx = (c - columns / 2) * step, d = r * step;
+            // mirrored like Snapshot.captureFront: the viewer over there looks through and sees what lies in front of this portal
+            Location l = at(width - 1 - anchor - rx + .5, 0, 1 + d + .5);
+            int i = FarTerrain.index(c, r);
+            wx[i] = l.getBlockX(); wz[i] = l.getBlockZ();
+            int cx = wx[i] >> 4, cz = wz[i] >> 4;
+            chunks.computeIfAbsent(((long) cx << 32) | (cz & 0xFFFFFFFFL), key ->
+                    world.getChunkAtAsync(cx, cz, false).thenApply(chunk -> chunk == null ? null : chunk.getChunkSnapshot(true, false, false)));
+        }
+        boolean ceiling = world.hasCeiling();
+        int top = Math.min(world.getMaxHeight() - 1, y + Snapshot.ABOVE), bottom = world.getMinHeight();
+        return java.util.concurrent.CompletableFuture.allOf(chunks.values().toArray(new java.util.concurrent.CompletableFuture[0]))
+                .thenApplyAsync(ignored -> {
+                    var far = new FarTerrain();
+                    for (int i = 0; i < wx.length; i++) {
+                        ChunkSnapshot s = chunks.get(((long) (wx[i] >> 4) << 32) | ((wz[i] >> 4) & 0xFFFFFFFFL)).join();
+                        if (s == null) continue;
+                        int bx = wx[i] & 15, bz = wz[i] & 15;
+                        // worlds with a ceiling (nether): search down from above the portal, else from the surface
+                        int yy = ceiling ? top : Math.min(s.getHighestBlockYAt(bx, bz), top + 200);
+                        boolean airAbove = !ceiling;
+                        for (; yy >= bottom; yy--) {
+                            BlockData b = s.getBlockData(bx, yy, bz);
+                            Material m = b.getMaterial();
+                            boolean empty = m.isAir() || m == Material.BARRIER || m == Material.LIGHT;
+                            if (empty) { airAbove = true; continue; }
+                            if (!airAbove) continue;
+                            far.set(i % FarTerrain.COLUMNS, i / FarTerrain.COLUMNS, yy + 1 - y, b.getAsString());
+                            break;
+                        }
+                    }
+                    return far;
+                });
+    }
+
     /** Version of the other side's view currently used by the fallback blocks. */
     public long remoteVersion() { return remoteVersion; }
 

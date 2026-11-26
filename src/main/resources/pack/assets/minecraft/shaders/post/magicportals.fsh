@@ -16,6 +16,8 @@ uniform sampler2D DataSampler;
 uniform sampler2D VoxelSampler;
 uniform sampler2D PaletteSampler;
 uniform sampler2D AtlasSampler;
+uniform sampler2D FarColorSampler;
+uniform sampler2D FarHeightSampler;
 
 layout(location = 0) in vec2 texCoord;
 layout(location = 0) out vec4 fragColor;
@@ -140,12 +142,14 @@ vec3 fogColor(vec3 d) {
 
 // Fog towards the horizon. Backwards (+z) the scene only reaches DP_DB blocks,
 // so the fog starts earlier there to hide the edge. Denser fog starts closer.
+// Fog. By default (fog <= 1) the view stays clear: the far terrain continues behind the blocks and only
+// gets a light aerial haze. fog > 1 lets everything fade out earlier. Backwards (+z, only seen from inside)
+// the scene ends after DP_DB blocks, so that edge always fades out.
 float fog(float dist, vec3 d) {
-    float fogEnd = d.z > 0.0 ? mix(float(DP_D) * 0.97, float(DP_DB) * 0.95, smoothstep(0.0, 0.5, d.z)) : float(DP_D) * 0.97;
-    float density = max(VIEW_FOG, 0.0);
-    if (density < 0.01) return smoothstep(fogEnd * 0.9, fogEnd, dist);   // only hide the edge of the scene
-    float end = min(fogEnd, fogEnd / density);
-    return smoothstep(end * (density > 1.0 ? 0.05 : 0.5), end, dist);
+    float back = d.z > 0.0 ? smoothstep(float(DP_DB) * 0.7, float(DP_DB) * 0.95, dist) * smoothstep(0.0, 0.5, d.z) : 0.0;
+    if (VIEW_FOG <= 1.0) return back;
+    float end = 300.0 / VIEW_FOG;
+    return max(back, smoothstep(end * 0.1, end, dist));
 }
 
 bool inOpening(vec2 p) {
@@ -168,7 +172,74 @@ vec2 boxHit(vec3 o, vec3 d, vec3 lo, vec3 hi) {
 
 /* Marches a ray from start (local, z < 0) through the voxel scene (DDA). The scene also extends in
  * front of the plane, so the in-between space shows the destination world all around. */
+
 float MARCH_T = 1e4;   // distance of the last hit along the ray (for weather)
+
+// ---------- far terrain: a soft heightfield beyond the block scene (no fog, slightly blurred) ----------
+
+float farTexel(int c, int r, int scene) {
+    if (c < 0 || r < 0 || c >= DP_FAR_COLUMNS || r >= DP_FAR_ROWS) return -1e4;
+    vec4 t = texelFetch(FarHeightSampler, ivec2(c, r + scene * DP_FAR_ROWS), 0);
+    if ((byte8(t.b) & 1) == 0) return -1e4;
+    return float(byte8(t.r) * 256 + byte8(t.g)) - 2048.0;
+}
+
+// Continuous cell coordinate of a local point; cell centres are whole numbers.
+vec2 farCell(vec3 p) {
+    float a = float((int(OPENING_W) - 1) / 2);
+    return vec2((p.x - a - 0.5) / DP_FAR_STEP + float(DP_FAR_COLUMNS / 2), (-p.z - 0.5) / DP_FAR_STEP);
+}
+
+// Smoothly interpolated surface height – the interpolation gives the soft, blurred look.
+float farHeight(vec3 p, int scene) {
+    vec2 g = farCell(p), b = floor(g), f = g - b;
+    ivec2 i = ivec2(b);
+    float h00 = farTexel(i.x, i.y, scene), h10 = farTexel(i.x + 1, i.y, scene);
+    float h01 = farTexel(i.x, i.y + 1, scene), h11 = farTexel(i.x + 1, i.y + 1, scene);
+    float known = max(max(h00, h10), max(h01, h11));
+    if (known < -1e3) return -1e4;
+    // missing neighbours (unloaded chunks, edges) take the known height so no holes appear
+    h00 = h00 < -1e3 ? known : h00; h10 = h10 < -1e3 ? known : h10;
+    h01 = h01 < -1e3 ? known : h01; h11 = h11 < -1e3 ? known : h11;
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(h00, h10, f.x), mix(h01, h11, f.x), f.y);
+}
+
+vec3 farView(vec3 p0, vec3 d, int scene, float tBefore) {
+    float maxDepth = float(DP_FAR_ROWS) * DP_FAR_STEP;
+    float t = 0.0, prevT = 0.0;
+    for (int n = 0; n < 220; n++) {
+        vec3 p = p0 + d * t;
+        if (-p.z > maxDepth || p.z > 1.0 || p.y > 330.0) break;
+        if (p.y < farHeight(p, scene)) {
+            float a = prevT, b = t;
+            for (int k = 0; k < 6; k++) {
+                float m = 0.5 * (a + b);
+                vec3 q = p0 + d * m;
+                if (q.y < farHeight(q, scene)) b = m; else a = m;
+            }
+            vec3 q = p0 + d * b;
+            vec2 g = farCell(q);
+            vec3 color = texture(FarColorSampler, vec2((g.x + 0.5) / float(DP_FAR_COLUMNS),
+                    (g.y + 0.5 + float(scene * DP_FAR_ROWS)) / float(DP_FAR_ROWS * DP_SCENES))).rgb;
+            float e = 1.5;
+            float hx = farHeight(q + vec3(e, 0.0, 0.0), scene) - farHeight(q - vec3(e, 0.0, 0.0), scene);
+            float hz = farHeight(q + vec3(0.0, 0.0, e), scene) - farHeight(q - vec3(0.0, 0.0, e), scene);
+            vec3 normal = abs(hx) > 500.0 || abs(hz) > 500.0 ? vec3(0.0, 1.0, 0.0) : normalize(vec3(-hx, 2.0 * e, -hz));
+            float shade = 0.6 + 0.4 * max(dot(normal, normalize(vec3(0.35, 0.85, 0.4))), 0.0);
+            color *= shade * SKY_LIGHT_COLOR * lightFactor(15.0 * SKY_SCALE);
+            float dist = tBefore + b;
+            MARCH_T = dist;
+            // aerial perspective: distant land takes on a little of the sky colour
+            color = mix(color, sky(d), smoothstep(30.0, maxDepth * 1.4, dist) * 0.5 * min(VIEW_FOG, 1.0));
+            return mix(color, fogColor(d), fog(dist, d));
+        }
+        prevT = t;
+        t += max(0.3, (tBefore + t) * 0.012);
+    }
+    return sky(d);
+}
+
 
 vec3 march(vec3 start, vec3 d, int scene) {
     MARCH_T = 1e4;
@@ -259,7 +330,7 @@ vec3 march(vec3 start, vec3 d, int scene) {
         else if (tMax.y < tMax.z) { tRay = tMax.y; tMax.y += tDelta.y; cell.y += stepDir.y; }
         else { tRay = tMax.z; tMax.z += tDelta.z; cell.z += stepDir.z; }
     }
-    return color + rest * sky(d);
+    return color + rest * farView(o0 + d * tRay, d, scene, tRay);
 }
 
 float weatherHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }

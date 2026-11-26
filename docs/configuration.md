@@ -165,7 +165,7 @@ portals:
   lobby:
     view:
       time: night          # day, sunset, night
-      fog: 2               # 0 = none, 1 = normal, up to 8 = very dense
+      fog: 2               # 0 = crystal clear, 1 = light haze far away (default), up to 8 = very dense
       fog-color: "#3060ff" # hex or a name (blue, red, green, purple, orange, white, …); none = sky colour
       tint: "#ff4020"      # colour filter over the whole view; none = off
       tint-strength: 0.5   # 0 – 1
@@ -175,7 +175,7 @@ portals:
 | Key | Default | Effect |
 |---|---|---|
 | `time` | `day` | `sunset`: orange sky and warm light. `night`: dark blue sky with stars; torches, lanterns, lava and other light sources glow (block light is baked into the scene). |
-| `fog` | `1` | Fog density. Higher values let the destination fade out after a few blocks. |
+| `fog` | `1` | `1`: no fog, only a light haze on distant land. `0`: crystal clear. Above `1` the destination fades into fog earlier (`8`: after a few blocks). |
 | `fog-color` | sky | Colour of the fog and the sky behind it – blue, red, green fog … |
 | `tint` / `tint-strength` | off / `0.5` | Colour filter over the view. |
 | `weather` | `none` | Animated particles in the destination with real depth: `rain`, `snow`, `ash` (grey flakes, Nether), `embers` (rising sparks). |

@@ -23,6 +23,8 @@ The snapshot is rotated by 180° so it fits the viewer on the other side, serial
 
 Up to 16 scenes share these textures; `magicportals_scene.glsl` tells the shader their size and count.
 
+**Far terrain.** Every 5 minutes each server also records a coarse heightmap in front of its portals – surface height and top block for every 2×2 column, 256 blocks wide and 240 deep – from chunks that are already generated (loaded asynchronously, never generated). The baker turns it into two small textures (average top-face colour, height). Rays that leave the detailed block grid continue over this heightfield; the smooth interpolation makes distant land look soft, like a depth-of-field blur.
+
 ## 3. The marker
 
 Every portal has an invisible, tiny glowing block display at the lower left corner of its opening (seen from behind). Its glow colour encodes the scene number, the facing, the style, the options and the size of the opening.
@@ -36,7 +38,7 @@ The entity-outline post effect runs whenever a glowing entity is on screen. Magi
 1. Read the 32 data pixels. If there is no valid marker, leave the image unchanged.
 2. Rebuild the view ray of every pixel from the inverse projection and turn it into the portal's own frame (facing). The eye position is taken from the projection itself, so view bobbing and every depth convention are handled correctly.
 3. Intersect the ray with the portal plane. If it hits the opening (the rectangular gate or the jagged rift outline) and the depth buffer shows nothing in front of it, continue; otherwise keep the normal image.
-4. March the ray through the voxel grid (DDA) and shade the first hit: face texture, tint, face shading, sky light, water transparency, plants as two crossed planes, distance fog into a sky gradient.
+4. March the ray through the voxel grid (DDA) and shade the first hit: face texture, tint, face shading, sky and block light, water transparency, plants as two crossed planes. Rays that leave the grid continue over the far-terrain heightfield.
 5. Rift style: add the animated edge – a thin bright line, haze, lightning arcs that flicker at their own rates, sparkles and a dark torn hem. From behind, a rift shows a starry nebula.
 6. If the camera itself is inside the opening area behind the plane, the whole screen is rendered from the scene – you are "inside" the destination.
 

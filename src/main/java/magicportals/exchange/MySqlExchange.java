@@ -209,7 +209,7 @@ public final class MySqlExchange implements Exchange {
     @Override public Path exportForBaking(Path workFolder) throws IOException {
         Files.createDirectories(workFolder);
         try (var old = Files.list(workFolder)) { for (Path p : old.toList()) Files.deleteIfExists(p); }
-        for (String key : snapshotKeys()) for (String kind : List.of(FRONT, BACK, VIEW)) {
+        for (String key : snapshotKeys()) for (String kind : List.of(FRONT, BACK, VIEW, FAR)) {
             byte[] data = loadSnapshot(key, kind);
             if (data != null) Files.write(workFolder.resolve(key + "." + kind), data);
         }

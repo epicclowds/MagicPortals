@@ -78,6 +78,15 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
     private interface Task<T> { T run(Exchange exchange) throws Exception; }
 
     /** Runs the task asynchronously and hands the result back on the main thread. */
+    private int farMinutes;
+
+    /** Captures the far terrain of a portal and stores it (kind "far"), every 5 minutes and on (re)load. */
+    private void saveFar(Portal p) {
+        String key = Portal.key(server, p.target);
+        p.captureFar().thenAccept(far -> async(ex -> { ex.saveSnapshot(key, Exchange.FAR, far.toBytes()); return null; }, null))
+                .exceptionally(e -> { getLogger().warning("Far terrain of " + key + ": " + e); return null; });
+    }
+
     private <T> void async(Task<T> task, Consumer<T> then) {
         var ex = exchange;
         Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
@@ -244,6 +253,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         for (Portal p : portals) {
             p.build();
             save(p.captureAll(server));
+            saveFar(p);
             getLogger().info("Portal " + server + " -> " + p.target + " at " + p.x + " " + p.y + " " + p.z + " (" + p.style.id + ")");
         }
         sync();
@@ -346,6 +356,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
     private void tick() {
         if (tick % 100 == 0) sync();
         if (tick % 1200 == 600) for (Portal p : portals) p.startCapture();
+        if (tick == 900 && ++farMinutes % 5 == 0) for (Portal p : portals) saveFar(p);
         for (Portal p : portals) { var done = p.captureStep(server); if (done != null) save(done); }
         if (tick % 2 == 0 && getConfig().getBoolean("fallback-blocks", false))
             for (Player player : Bukkit.getOnlinePlayers()) for (Portal p : portals) p.updateFallback(player, tick);

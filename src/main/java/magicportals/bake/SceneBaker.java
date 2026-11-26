@@ -9,6 +9,7 @@ import java.util.function.Consumer;
 import java.util.function.IntUnaryOperator;
 import java.util.zip.ZipFile;
 import javax.imageio.ImageIO;
+import magicportals.portal.FarTerrain;
 import magicportals.portal.Snapshot;
 
 /**
@@ -58,7 +59,13 @@ public final class SceneBaker {
                 Path view = input.resolve(key + ".view");
                 views.add(viewParameters(Files.exists(view) ? Files.readString(view) : ""));
             }
-            baker.write(scenes, views, output);
+            List<FarTerrain> fars = new ArrayList<>();
+            for (String key : keys) {
+                Path far = input.resolve(key + ".far");
+                try { fars.add(Files.exists(far) ? FarTerrain.read(Files.readAllBytes(far)) : new FarTerrain()); }
+                catch (IOException e) { log.accept("  ! far terrain of " + key + ": " + e.getMessage()); fars.add(new FarTerrain()); }
+            }
+            baker.write(scenes, views, fars, output);
         }
         log.accept("Scenes: " + String.join(", ", keys));
         var numbers = new LinkedHashMap<String, Integer>();
@@ -373,6 +380,28 @@ public final class SceneBaker {
         }
     }
 
+    private final Map<String, Integer> topColors = new HashMap<>();
+
+    /** Average colour of a block's top face (tinted like grass and leaves), for the far terrain; -1 for air. */
+    private int topColor(String state) {
+        return topColors.computeIfAbsent(state, k -> {
+            int id = paletteId(k);
+            if (id == 0) return -1;
+            Shape s = shapes.get(id);
+            BufferedImage img = tileImages.get(s.tile[s.kind == 2 ? 2 : 0]);
+            double r = 0, g = 0, b = 0, n = 0;
+            for (int y = 0; y < img.getHeight(); y++) for (int x = 0; x < img.getWidth(); x++) {
+                int p = img.getRGB(x, y);
+                if ((p >>> 24) < 128) continue;
+                r += p >> 16 & 255; g += p >> 8 & 255; b += p & 255; n++;
+            }
+            if (n == 0) return -1;
+            r /= n; g /= n; b /= n;
+            if ((s.tintMask & 1) != 0) { r *= (s.tint >> 16 & 255) / 255.0; g *= (s.tint >> 8 & 255) / 255.0; b *= (s.tint & 255) / 255.0; }
+            return ((int) r & 255) << 16 | ((int) g & 255) << 8 | ((int) b & 255);
+        });
+    }
+
     /** Light level a block state gives off. */
     private static int emission(String state) {
         try { return org.bukkit.Bukkit.createBlockData(state).getLightEmission(); }
@@ -482,7 +511,22 @@ public final class SceneBaker {
         return light;
     }
 
-    private void write(List<int[]> scenes, List<double[]> views, Path output) throws IOException {
+    private void write(List<int[]> scenes, List<double[]> views, List<FarTerrain> fars, Path output) throws IOException {
+        // far terrain first: its top blocks may add shapes and textures
+        BufferedImage farColor = new BufferedImage(FarTerrain.COLUMNS, FarTerrain.ROWS * scenes.size(), BufferedImage.TYPE_INT_ARGB);
+        BufferedImage farHeight = new BufferedImage(FarTerrain.COLUMNS, FarTerrain.ROWS * scenes.size(), BufferedImage.TYPE_INT_ARGB);
+        for (int s = 0; s < fars.size(); s++) {
+            FarTerrain far = fars.get(s);
+            int[] colors = new int[far.palette.size()];
+            for (int p = 0; p < colors.length; p++) colors[p] = topColor(far.palette.get(p));
+            for (int r = 0; r < FarTerrain.ROWS; r++) for (int c = 0; c < FarTerrain.COLUMNS; c++) {
+                int i = FarTerrain.index(c, r), py = r + s * FarTerrain.ROWS;
+                boolean exists = far.height[i] != FarTerrain.NONE && colors[far.block[i]] >= 0;
+                int h = exists ? far.height[i] + 2048 : 0;
+                farHeight.setRGB(c, py, 0xFF000000 | ((h >> 8) & 255) << 16 | (h & 255) << 8 | (exists ? 1 : 0));
+                farColor.setRGB(c, py, 0xFF000000 | (exists ? colors[far.block[i]] : 0x808080));
+            }
+        }
         int count = scenes.size();
         // voxel texture: R,G = palette id, B = sky light (bits 0-3) + "water above" flag (bit 4) + block light / 2 (bits 5-7)
         BufferedImage voxelImage = new BufferedImage(W * 8, DT * HB * count, BufferedImage.TYPE_INT_ARGB);
@@ -523,6 +567,8 @@ public final class SceneBaker {
         ImageIO.write(voxelImage, "png", textures.resolve("voxel.png").toFile());
         ImageIO.write(paletteImage, "png", textures.resolve("palette.png").toFile());
         ImageIO.write(atlas, "png", textures.resolve("atlas.png").toFile());
+        ImageIO.write(farColor, "png", textures.resolve("farcolor.png").toFile());
+        ImageIO.write(farHeight, "png", textures.resolve("farheight.png").toFile());
 
         Path include = output.resolve("assets/minecraft/shaders/include");
         Files.createDirectories(include);
@@ -540,23 +586,26 @@ public final class SceneBaker {
                 #define DP_GY0 %d
                 #define DP_SCENES %d
                 #define DP_ATLAS_COLUMNS %d
+                #define DP_FAR_COLUMNS %d
+                #define DP_FAR_ROWS %d
+                #define DP_FAR_STEP %d.0
                 #define DP_HORIZON vec3(0.75, 0.85, 1.0)
                 #define DP_ZENITH vec3(0.47, 0.65, 1.0)
                 // per scene: (time, fog, weather, tint strength), (tint rgb, custom fog), (fog rgb, 0)
                 const vec4 DP_VIEW[%d] = vec4[](%s);
                 #endif
-                """.formatted(W, H, D, DB, DT, HB, RX0, GY0, count, ATLAS_COLUMNS, count * 3, viewArray(views)));
+                """.formatted(W, H, D, DB, DT, HB, RX0, GY0, count, ATLAS_COLUMNS, FarTerrain.COLUMNS, FarTerrain.ROWS, FarTerrain.STEP, count * 3, viewArray(views)));
 
         Path post = output.resolve("assets/minecraft/post_effect");
         Files.createDirectories(post);
-        Files.writeString(post.resolve("entity_outline.json"), postEffect(voxelImage.getWidth(), voxelImage.getHeight(), paletteHeight));
+        Files.writeString(post.resolve("entity_outline.json"), postEffect(voxelImage.getWidth(), voxelImage.getHeight(), paletteHeight, farColor.getHeight()));
         log.accept(String.format("Done: %d scenes, %d block shapes, %d textures", count, shapes.size(), tileImages.size()));
     }
 
     private static int sixteenths(double v) { return (int) Math.round(Math.max(0, Math.min(1, v)) * 16); }
 
     /** The vanilla entity_outline post effect with the MagicPortals passes in front of it. */
-    private static String postEffect(int voxelWidth, int voxelHeight, int paletteHeight) {
+    private static String postEffect(int voxelWidth, int voxelHeight, int paletteHeight, int farHeight) {
         return """
                 {
                     "targets": { "swap": {}, "mp_image": {}, "mp_clean": {} },
@@ -570,7 +619,9 @@ public final class SceneBaker {
                                 { "sampler_name": "Data", "target": "minecraft:entity_outline" },
                                 { "sampler_name": "Voxel", "location": "minecraft:magicportals/voxel", "width": %d, "height": %d, "bilinear": false },
                                 { "sampler_name": "Palette", "location": "minecraft:magicportals/palette", "width": %d, "height": %d, "bilinear": false },
-                                { "sampler_name": "Atlas", "location": "minecraft:magicportals/atlas", "width": %d, "height": %d, "bilinear": false }
+                                { "sampler_name": "Atlas", "location": "minecraft:magicportals/atlas", "width": %d, "height": %d, "bilinear": false },
+                                { "sampler_name": "FarColor", "location": "minecraft:magicportals/farcolor", "width": %d, "height": %d, "bilinear": true },
+                                { "sampler_name": "FarHeight", "location": "minecraft:magicportals/farheight", "width": %d, "height": %d, "bilinear": false }
                             ],
                             "output": "mp_image"
                         },
@@ -616,6 +667,7 @@ public final class SceneBaker {
                         }
                     ]
                 }
-                """.formatted(voxelWidth, voxelHeight, PALETTE_WIDTH, paletteHeight, ATLAS_SIZE, ATLAS_SIZE);
+                """.formatted(voxelWidth, voxelHeight, PALETTE_WIDTH, paletteHeight, ATLAS_SIZE, ATLAS_SIZE,
+                        FarTerrain.COLUMNS, farHeight, FarTerrain.COLUMNS, farHeight);
     }
 }

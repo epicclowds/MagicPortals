@@ -17,7 +17,7 @@
 
 ## Features
 
-- **See where you are going.** The opening shows the real destination – blocks, textures, light, water, plants, fog – in true 3D with parallax as you move. No fake blocks, no server load: a post-processing shader draws it on the client.
+- **See where you are going.** The opening shows the real destination – blocks, textures, light, water, plants – in true 3D with parallax as you move. Beyond the detailed blocks the landscape continues softly up to ~240 blocks, without fog. No fake blocks, no server load: a post-processing shader draws it on the client.
 - **Walk through to switch servers.** Players step into the portal and Velocity moves them to the target server, where they arrive right in front of the portal leading back.
 - **Six styles.** `gate` – an opening in a thick stone wall. `rift` – a jagged dimensional crack with lightning arcs. `inferno` – a giant fire for the Nether. `storm` – the eye of a thunderstorm with lightning strikes for boss chambers. `void` – a swirling vortex. `frost` – a huge ice crystal rising from the ground. Optional sounds (adjustable volume, replaceable by your own `.ogg` files), particle amount and player effects like a frozen screen.
 - **Change the mood of the view.** Night with stars and glowing torches, sunset, dense or coloured fog, a colour filter, falling snow, rain, ash or rising embers – per portal.
