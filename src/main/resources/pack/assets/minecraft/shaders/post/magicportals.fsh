@@ -4,7 +4,8 @@
 // MagicPortals: draws the destination world into the portal opening.
 // Camera and projection come from the marker's data row (entity_outline buffer),
 // the scene itself is a baked voxel texture in the resource pack.
-// Coordinates ("local"): world axes, origin at the lower west corner of the opening on the portal plane.
+// Coordinates ("local"): the portal's own frame, origin at the lower corner of the opening on the portal plane
+// (the front face of the opening, flush with the frame).
 // The opening spans x 0..3, y 0..3 at z = 0; the destination world readData at z < 0.
 
 #include <minecraft:magicportals_marker.glsl>
@@ -892,7 +893,7 @@ bool renderPortal(vec4 base, out vec4 outColor) {
         PORTAL_DIST = tPlane;
         vec3 hit = eye + d * tPlane;
         if (!inOpening(hit.xy)) return false;
-        if (eye.z + d.z * sceneDist > 1.02) return false;   // only what stands in front of the wall row hides the portal; blocks inside the opening (fallback portal surface) are drawn over
+        if (sceneDist < tPlane - 0.03) return false;   // something in front of the portal plane (the front face of the opening) hides it
         vec3 color = viewMarch(hit + d * 1e-3, d, scene, time);
         float edge = min(min(hit.x, OPENING_W - hit.x), min(hit.y, OPENING_H - hit.y));
         color += vec3(0.35, 0.85, 1.0) * exp(-edge * 22.0) * 0.55;
@@ -903,7 +904,7 @@ bool renderPortal(vec4 base, out vec4 outColor) {
         float tPlane = -eye.z / d.z;
         PORTAL_DIST = tPlane;
         vec3 hit = eye + d * tPlane;
-        if (eye.z + d.z * sceneDist > 1.02) return false;   // only what stands in front of the wall row hides the portal; blocks inside the opening (fallback portal surface) are drawn over
+        if (sceneDist < tPlane - 0.03) return false;   // something in front of the portal plane (the front face of the opening) hides it
         float angle;
         float edgeDist = riftDistance(hit.xy, time, angle);
         if (edgeDist > 1.2) return false;
@@ -916,7 +917,7 @@ bool renderPortal(vec4 base, out vec4 outColor) {
         float tPlane = -eye.z / d.z;
         PORTAL_DIST = tPlane;
         vec3 hit = eye + d * tPlane;
-        if (eye.z + d.z * sceneDist > 1.02) return false;   // only what stands in front of the wall row hides the portal; blocks inside the opening (fallback portal surface) are drawn over
+        if (sceneDist < tPlane - 0.03) return false;   // something in front of the portal plane (the front face of the opening) hides it
         float angle;
         float e = styleDistance(style, hit.xy, time, angle);
         if (e > styleReach(style)) return false;

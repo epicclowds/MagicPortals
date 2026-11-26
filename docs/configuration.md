@@ -95,7 +95,7 @@ One entry per portal on this server. The key is the portal's **name**; classic c
 | `barriers` | `false` | Only with `inside-view: true`: `true` places invisible barriers in the 3 blocks behind the opening so players cannot walk in there. Off by default – the space behind the portal stays walkable. |
 
 **Position and orientation.** `facing` is the side players come from: with `facing: south` they approach from the south and walk north through the opening; the portal is flat (or shows a nebula, for rifts) from the other side.
-`x y z` is the bottom centre block of the opening (for even widths the left one of the two middle blocks, seen from the front); `y` is the block players stand in (one above the floor). The portal plane is the back face of that block row. The easiest way to get it right is `/mp set <target>`: with a wand selection the opening faces the side you are standing on, without one the portal is placed 3 blocks in the direction you look, its opening facing you.
+`x y z` is the bottom centre block of the opening (for even widths the left one of the two middle blocks, seen from the front); `y` is the block players stand in (one above the floor). The portal plane is the front face of that block row, flush with the frame. The easiest way to get it right is `/mp set <target>`: with a wand selection the opening faces the side you are standing on, without one the portal is placed 3 blocks in the direction you look, its opening facing you.
 
 What gets built:
 

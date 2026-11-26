@@ -21,12 +21,14 @@ import org.joml.Vector3f;
  * <p>
  * Everything is computed in the portal's local frame (see {@link Facing}): the opening covers local cells
  * i = 0..width-1, j = 0..height-1 in the wall row k = 0; players stand at k &gt; 0 and look through the
- * opening towards k &lt; 0. The portal plane is the back face of the wall row (local z = 0). The local
+ * opening towards k &lt; 0. The portal plane is the front face of the wall row (local z = {@link #PLANE}), where the marker sits. The local
  * origin is the lower corner of the opening on that plane, where the shader marker sits.
  * In the config, x/y/z is the "anchor" cell (i = (width-1)/2, j = 0, k = 0).
  */
 public final class Portal {
     public static final int MAX_SIZE = 7;
+    /** Local z of the portal plane: the front face of the opening, flush with the frame. */
+    static final double PLANE = 1.0;
     /** id = name of the portal in the config; link = connection ID shared with its counterpart (null: classic pairing by server). */
     public final String id, target, link, name;
     public final int x, y, z, width, height;
@@ -165,7 +167,7 @@ public final class Portal {
         if (rift) buildRift(); else if (outer != null) buildWall();
         // Marker for the portal shader at the local origin. Its glow colour carries scene, facing, style,
         // options and size (R=254-(style>>1), G=markerCode, B=160+scene+16*facing).
-        marker = world.spawn(origin, BlockDisplay.class, d -> {
+        marker = world.spawn(at(0, 0, PLANE), BlockDisplay.class, d -> {
             d.setPersistent(false);
             d.setBlock(Material.WHITE_CONCRETE.createBlockData());
             d.setTransformation(new Transformation(new Vector3f(), new Quaternionf(), new Vector3f(.001f, .001f, .001f), new Quaternionf()));
@@ -174,7 +176,7 @@ public final class Portal {
         decoration.add(marker);
         setScene(scene);
         if (!showLabel) return;
-        double labelHeight = style == Style.RIFT ? height * 1.53 + 1.1 : rift ? height + 1.4 : height + (outer != null ? 2.5 : 1.0), labelZ = rift || outer == null ? .5 : 1.2;
+        double labelHeight = style == Style.RIFT ? height * 1.53 + 1.1 : rift ? height + 1.4 : height + (outer != null ? 2.5 : 1.0), labelZ = rift || outer == null ? PLANE + .5 : PLANE + .2;
         label = world.spawn(at(width / 2.0, labelHeight, labelZ), TextDisplay.class, d -> {
             d.setPersistent(false); d.setBillboard(Display.Billboard.CENTER); d.setShadowed(true);
         });
@@ -198,13 +200,14 @@ public final class Portal {
             barrier(i, j, 0);
         }
         double w = width, h = height;
-        box(0, 0, .02, .06, h, .96, Material.AMETHYST_BLOCK, true);
-        box(w - .06, 0, .02, .06, h, .96, Material.AMETHYST_BLOCK, true);
-        box(0, h - .06, .02, w, .06, .96, Material.AMETHYST_BLOCK, true);
-        box(0, 0, -.01, .05, h, .05, Material.LIGHT_BLUE_STAINED_GLASS, true);
-        box(w - .05, 0, -.01, .05, h, .05, Material.LIGHT_BLUE_STAINED_GLASS, true);
-        box(0, h - .05, -.01, w, .05, .05, Material.LIGHT_BLUE_STAINED_GLASS, true);
-        box(0, 0, -.01, w, .03, .05, Material.LIGHT_BLUE_STAINED_GLASS, true);
+        // rim and glass edge sit just in front of the portal plane, so the shader does not draw over them
+        box(0, 0, PLANE, .06, h, .06, Material.AMETHYST_BLOCK, true);
+        box(w - .06, 0, PLANE, .06, h, .06, Material.AMETHYST_BLOCK, true);
+        box(0, h - .06, PLANE, w, .06, .06, Material.AMETHYST_BLOCK, true);
+        box(.06, 0, PLANE, .04, h, .05, Material.LIGHT_BLUE_STAINED_GLASS, true);
+        box(w - .1, 0, PLANE, .04, h, .05, Material.LIGHT_BLUE_STAINED_GLASS, true);
+        box(0, h - .1, PLANE, w, .04, .05, Material.LIGHT_BLUE_STAINED_GLASS, true);
+        box(0, 0, PLANE, w, .03, .05, Material.LIGHT_BLUE_STAINED_GLASS, true);
     }
 
     public void tearDown() {
@@ -465,7 +468,7 @@ public final class Portal {
         double t = random.nextDouble();
         double half = .8 * width / 3.0 * Math.pow(Math.sin(Math.PI * t), .95) * .9 + outside;
         double side = random.nextBoolean() ? 1 : -1;
-        return at(width / 2.0 + side * half + (random.nextDouble() - .5) * .3, .35 + height * 1.533 * t, .02);   // lifted 0.6 like in the shader
+        return at(width / 2.0 + side * half + (random.nextDouble() - .5) * .3, .35 + height * 1.533 * t, PLANE + .02);   // lifted 0.6 like in the shader
     }
 
     /** Random point on the edge of the opening of the styles inferno, storm, void and frost (as in the shader). */
@@ -478,17 +481,17 @@ public final class Portal {
             double t = random.nextDouble(), fh = h * 1.55;
             double profile = t < .3 ? .78 + .22 * Math.sqrt(Math.max(0, 1 - Math.pow((.3 - t) / .3, 2))) : Math.pow(1 - (t - .3) / .7, 1.4);
             double half = w * .5 * profile + outside;
-            return at(w / 2 + (random.nextBoolean() ? half : -half), -.1 + t * fh, .02);
+            return at(w / 2 + (random.nextBoolean() ? half : -half), -.1 + t * fh, PLANE + .02);
         }
         if (style == Style.FROST) {
             // outline of the ice crystal: two sides, two roof edges
             double cw = w * .5 * 1.08, cx = w / 2, ch = h * 1.6, s = random.nextBoolean() ? 1 : -1, t = random.nextDouble();
-            if (random.nextDouble() < .55) return at(cx + s * (cw + (cw * .9 - cw) * t + outside), -.2 + (ch * .62 + .2) * t, .02);
-            return at(cx + s * (cw * .9 * (1 - t) + outside), ch * .62 + ch * .38 * t + outside * .5, .02);
+            if (random.nextDouble() < .55) return at(cx + s * (cw + (cw * .9 - cw) * t + outside), -.2 + (ch * .62 + .2) * t, PLANE + .02);
+            return at(cx + s * (cw * .9 * (1 - t) + outside), ch * .62 + ch * .38 * t + outside * .5, PLANE + .02);
         }
         double rx = style == Style.STORM ? Math.min(w, h) / 2 : w / 2, ry = style == Style.STORM ? rx : h / 2;
         double t = random.nextDouble() * 2 * Math.PI;
-        return at(w / 2 + Math.cos(t) * (rx + outside), h / 2 + Math.sin(t) * (ry + outside), .02);
+        return at(w / 2 + Math.cos(t) * (rx + outside), h / 2 + Math.sin(t) * (ry + outside), PLANE + .02);
     }
 
     /** Sound slots a portal can play; each can be replaced by a custom sound (option "sounds"). */
@@ -663,7 +666,7 @@ public final class Portal {
             for (int i = 0, k = n(2); i < k; i++) p.spawnParticle(Particle.SMALL_FLAME, edge(.1), 0, 0, 1, 0, .04);
             for (int i = 0, k = n(2); i < k; i++) p.spawnParticle(Particle.DUST, edge(random.nextDouble() * .6), 1, .1, .3, .1, 0, EMBERS[random.nextInt(EMBERS.length)]);
             if (random.nextInt(4) == 0) p.spawnParticle(Particle.LAVA, edge(0), 1, 0, 0, 0, 0);
-            if (random.nextInt(3) == 0) p.spawnParticle(Particle.LARGE_SMOKE, at(width / 2.0, height + .3, .1), 0, (random.nextDouble() - .5) * .1, 1, 0, .05);
+            if (random.nextInt(3) == 0) p.spawnParticle(Particle.LARGE_SMOKE, at(width / 2.0, height + .3, PLANE + .1), 0, (random.nextDouble() - .5) * .1, 1, 0, .05);
             if (p.getLocation().distanceSquared(centre) > 256) continue;
             if (random.nextInt(5) == 0) sound(p, centre, "ambient", "minecraft:block.fire.ambient", .6f, pitch(.8f, 1.2f));
             if (random.nextInt(12) == 0) sound(p, centre, "crackle", "minecraft:block.lava.pop", .5f, pitch(.8f, 1.2f));
@@ -782,9 +785,9 @@ public final class Portal {
                 else if (u < width + height) { px = width; py = height - (u - width); }
                 else if (u < 2 * width + height) { px = width - (u - width - height); py = 0; }
                 else { px = 0; py = u - 2 * width - height; }
-                p.spawnParticle(reachable ? Particle.END_ROD : Particle.SMOKE, at(px, py, .05), 0, 0, .02, 0, .3);
+                p.spawnParticle(reachable ? Particle.END_ROD : Particle.SMOKE, at(px, py, PLANE + .05), 0, 0, .02, 0, .3);
             }
-            if (!reachable) p.spawnParticle(Particle.PORTAL, at(width / 2.0, height / 2.0, .1), 12, width * .3, height * .3, width * .3, .2);
+            if (!reachable) p.spawnParticle(Particle.PORTAL, at(width / 2.0, height / 2.0, PLANE + .1), 12, width * .3, height * .3, width * .3, .2);
             if (ticks % 25 == 0 && p.getLocation().distanceSquared(centre) < 144) sound(p, centre, "hum", "minecraft:block.beacon.ambient", .25f, 1.2f);
         }
     }
