@@ -81,6 +81,10 @@ One entry per portal on this server. The key is the portal's **name**; classic c
 | `particles` | `1.0` | Amount of particles, `0` (none) – `5`. |
 | `effects` | `false` | `true` turns on the style's effect on nearby players (see [Styles](#styles)): burning, frozen screen, darkness, camera jolt. Only visual, no damage. |
 | `fallback` | global `fallback` | What players **without the shader** see (shader packs like Iris/Complementary, or no server pack): `none` (default), `nether` – the opening filled with nether portal blocks, `end` – filled with end gateway blocks (starfield), `world` – the destination as client-side blocks behind the portal. The blocks only exist on the clients; players with the shader see the real view drawn over them. |
+| `maintenance` | `false` | Closed for maintenance: nobody can walk through (admins can by sneaking). Switch with `/mp maintenance <portal|all> [on|off]`. |
+| `maintenance-look` | `ring,text` | Any of `ring` (a ring of glowing letters turning around the portal), `text` (a sign "⚠ MAINTENANCE ⚠" with a line below), `bars` (iron grille with yellow-black barrier tape), or `all`. |
+| `maintenance-text` | "This portal is temporarily closed." | Line under the sign; `none` for just the title. |
+| `maintenance-push` | `true` | Players who come close are flung back with sparks and a sound. |
 | `style` | `gate` | The look, see [Styles](#styles): `gate`, `rift`, `inferno`, `storm`, `void`, `frost`. |
 | `x`, `y`, `z` | auto | Position of the portal (see below). If missing, MagicPortals places the portal on flat ground near the world spawn and writes the coordinates back. |
 | `facing` | `south` | Direction the opening faces, i.e. the side players walk in from: `south`, `north`, `east` or `west`. `/mp set` fills this in for you. |

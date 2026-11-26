@@ -175,6 +175,7 @@ public final class Portal {
         });
         decoration.add(marker);
         setScene(scene);
+        if (maintenance) buildMaintenance();
         if (!showLabel) return;
         double labelHeight = style == Style.RIFT ? height * 1.53 + 1.1 : rift ? height + 1.4 : height + (outer != null ? 2.5 : 1.0), labelZ = rift || outer == null ? PLANE + .5 : PLANE + .2;
         label = world.spawn(at(width / 2.0, labelHeight, labelZ), TextDisplay.class, d -> {
@@ -211,6 +212,7 @@ public final class Portal {
     }
 
     public void tearDown() {
+        ring.clear();
         clearEffects();
         if (!filled.isEmpty()) { var real = fillBlocks(true); for (UUID id : filled) { Player p = Bukkit.getPlayer(id); if (p != null && p.getWorld() == world) p.sendMultiBlockChange(real); } filled.clear(); }
         for (Player p : world.getPlayers()) { var v = views.get(p.getUniqueId()); if (v != null) reset(p, v); }
@@ -593,6 +595,7 @@ public final class Portal {
             case FROST -> frostParticles();
         }
         if (effects) playerEffects();
+        if (maintenance) maintenanceTick();
     }
 
     /** Number of particles for a base amount, scaled by the particle option (randomly rounded). */
@@ -807,6 +810,129 @@ public final class Portal {
             if (ticks % 20 == 0) sound(p, centre, "hum", "minecraft:block.beacon.ambient", .35f, 1.5f);
             if (random.nextInt(45) == 0) sound(p, centre, "accent", "minecraft:block.amethyst_block.resonate", .25f, pitch(.6f, 1f));
             if (random.nextInt(70) == 0) sound(p, centre, "crackle", "minecraft:entity.lightning_bolt.impact", .06f, 1.8f);
+        }
+    }
+
+
+    // ---------- maintenance ----------
+
+    /** Maintenance mode: nobody gets through; looks: "ring" (rotating text ring), "text" (sign), "bars" (grille and tape). */
+    public boolean maintenance, maintenancePush = true;
+    public Set<String> maintenanceLook = new HashSet<>(Set.of("ring", "text"));
+    /** Text running around the ring, the sign title and the line under it. */
+    public String maintenanceRing = "MAINTENANCE ✦ ", maintenanceTitle = "MAINTENANCE", maintenanceText = "";
+    private final List<TextDisplay> ring = new ArrayList<>();
+    private double ringAngle;
+    private final Map<UUID, Long> pushed = new HashMap<>();
+
+    /** Warning gradient for the maintenance look: yellow to orange. */
+    private static Color warning(double t) {
+        t = Math.max(0, Math.min(1, t));
+        return Color.fromRGB(255, (int) Math.round(214 - 120 * t), (int) Math.round(10 + 20 * t));
+    }
+
+    private void buildMaintenance() {
+        double w = width, h = height;
+        if (maintenanceLook.contains("bars")) {
+            // a grille of iron bars just in front of the portal plane (the shader view stays behind it)
+            var bars = (org.bukkit.block.data.MultipleFacing) Material.IRON_BARS.createBlockData();
+            boolean alongX = facing == Facing.SOUTH || facing == Facing.NORTH;
+            for (var face : alongX ? List.of(org.bukkit.block.BlockFace.EAST, org.bukkit.block.BlockFace.WEST)
+                                   : List.of(org.bukkit.block.BlockFace.NORTH, org.bukkit.block.BlockFace.SOUTH)) bars.setFace(face, true);
+            for (int i = 0; i < width; i++) for (int j = 0; j < height; j++) {
+                Location a = at(i, j, PLANE - .42), b = at(i + 1, j + 1, PLANE + .58);
+                Location min = new Location(world, Math.min(a.getX(), b.getX()), Math.min(a.getY(), b.getY()), Math.min(a.getZ(), b.getZ()));
+                decoration.add(world.spawn(min, BlockDisplay.class, e -> { e.setPersistent(false); e.setBlock(bars); }));
+            }
+            // and two strips of yellow-black barrier tape across it
+            for (double y : new double[]{h * .3, h * .68}) {
+                int n = 0;
+                for (double x = -.3; x < w + .3; x += .3, n++)
+                    box(x, y, PLANE + .12, .3, .14, .03, n % 2 == 0 ? Material.YELLOW_CONCRETE : Material.BLACK_CONCRETE, true);
+            }
+        }
+        if (maintenanceLook.contains("text")) {
+            Component sign = Component.text("⚠ " + maintenanceTitle + " ⚠", net.kyori.adventure.text.format.TextColor.color(0xFFC21A),
+                    net.kyori.adventure.text.format.TextDecoration.BOLD);
+            if (!maintenanceText.isBlank()) sign = sign.append(Component.newline())
+                    .append(Component.text(maintenanceText, net.kyori.adventure.text.format.TextColor.color(0xE8E2D0)));
+            Component text = sign;
+            decoration.add(world.spawn(at(w / 2, h / 2 + .2, PLANE + .35), TextDisplay.class, d -> {
+                d.setPersistent(false);
+                d.setBillboard(Display.Billboard.CENTER);
+                d.text(text);
+                d.setBackgroundColor(Color.fromARGB(150, 20, 14, 8));
+                d.setShadowed(true);
+                d.setBrightness(new Display.Brightness(15, 15));
+                d.setTransformation(new Transformation(new Vector3f(), new Quaternionf(), new Vector3f(1.3f, 1.3f, 1.3f), new Quaternionf()));
+            }));
+        }
+        if (maintenanceLook.contains("ring")) {
+            // one text display per letter on a circle around the opening, turned so the letters follow the circle
+            double radius = Math.max(w, h) / 2 + .9;
+            String text = maintenanceRing.isEmpty() ? "MAINTENANCE ✦ " : maintenanceRing;
+            int count = (int) Math.round(2 * Math.PI * radius / .42);
+            for (int i = 0; i < count; i++) {
+                char c = text.charAt(i % text.length());
+                Color color = warning(0.5 + 0.5 * Math.sin(i * 2 * Math.PI / count * 2));
+                TextDisplay letter = world.spawn(at(w / 2, h / 2, PLANE + .1), TextDisplay.class, d -> {
+                    d.setPersistent(false);
+                    d.setBillboard(Display.Billboard.FIXED);
+                    d.setRotation(facing.yaw, 0);
+                    d.text(Component.text(String.valueOf(c), net.kyori.adventure.text.format.TextColor.color(color.asRGB()),
+                            net.kyori.adventure.text.format.TextDecoration.BOLD));
+                    d.setBackgroundColor(Color.fromARGB(0, 0, 0, 0));
+                    d.setBrightness(new Display.Brightness(15, 15));
+                    d.setTeleportDuration(4);
+                    d.setInterpolationDuration(4);
+                });
+                ring.add(letter);
+                decoration.add(letter);
+            }
+            placeRing();
+        }
+    }
+
+    /** Moves the ring letters to their place for the current angle (the client interpolates in between). */
+    private void placeRing() {
+        if (ring.isEmpty()) return;
+        double radius = Math.max(width, height) / 2.0 + .9, cx = width / 2.0, cy = height / 2.0;
+        int count = ring.size();
+        for (int i = 0; i < count; i++) {
+            double a = ringAngle - i * 2 * Math.PI / count;   // clockwise, so the text reads left to right at the top
+            TextDisplay d = ring.get(i);
+            Location l = at(cx + Math.cos(a) * radius, cy + Math.sin(a) * radius, PLANE + .1);
+            l.setYaw(facing.yaw);
+            l.setPitch(0);
+            d.teleport(l);
+            // letters are anchored at their bottom centre: centre them on the circle, then turn them along it
+            var roll = new Quaternionf().rotateZ((float) (a - Math.PI / 2));
+            var shift = roll.transform(new Vector3f(0, -.2f, 0));
+            d.setInterpolationDelay(0);
+            d.setTransformation(new Transformation(shift, roll, new Vector3f(1.6f, 1.6f, 1.6f), new Quaternionf()));
+        }
+    }
+
+    /** Every 4 ticks: turn the ring, push players away who come too close. */
+    private void maintenanceTick() {
+        ringAngle -= .05;
+        placeRing();
+        if (!maintenancePush) return;
+        long now = System.currentTimeMillis();
+        for (Player p : world.getPlayers()) {
+            if (p.getGameMode() == GameMode.SPECTATOR) continue;
+            // admins get through by sneaking, to work on the portal
+            if (p.isSneaking() && p.hasPermission("magicportals.admin")) continue;
+            double[] l = local(p.getLocation());
+            if (l[2] < PLANE - .6 || l[2] > PLANE + 1.8 || l[0] < -.6 || l[0] > width + .6 || l[1] < -1 || l[1] > height + .5) continue;
+            if (pushed.getOrDefault(p.getUniqueId(), 0L) > now) continue;
+            pushed.put(p.getUniqueId(), now + 600);
+            // away from the portal (local +z) and a little up
+            p.setVelocity(new org.bukkit.util.Vector(facing.zx, 0, facing.zz).multiply(1.1).setY(.45));
+            Location spot = p.getLocation().add(0, 1, 0);
+            p.spawnParticle(Particle.ELECTRIC_SPARK, spot, 25, .3, .5, .3, .4);
+            p.playSound(spot, "minecraft:entity.iron_golem.repair", SoundCategory.BLOCKS, .8f, .6f);
+            p.playSound(spot, "minecraft:block.beacon.deactivate", SoundCategory.BLOCKS, .6f, 1.4f);
         }
     }
 

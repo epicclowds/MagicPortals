@@ -124,6 +124,7 @@ All commands need `magicportals.admin` (default: op). Aliases: `/mp`, `/magicpor
 | `/mp set <name> <server> [id] [display name]` | Create or move a portal with a connection ID; the counterpart on `<server>` uses the same ID |
 | `/mp set <server> [name]` | Classic: create or move the portal to `<server>`, paired with the portal back. Into the opening marked with the wand (facing the side you stand on), otherwise 3 blocks in front of you (facing you) |
 | `/mp edit <server> [setting] [value]` | Show or change a portal's settings in game: `name`, `style`, `facing`, `width`, `height`, `inside-view`, `barriers`, `label`, `sound`, `volume`, `particles`, `effects`, `frame` (`none`/`wall`) custom sounds `sound.<slot>` ([details](docs/configuration.md#custom-sounds)) and the [view](docs/configuration.md#view) settings `time`, `fog`, `fog-color`, `tint`, `tint-strength`, `weather`. Applied immediately; after `facing`/`width`/`height` run `/mp update` |
+| `/mp maintenance <portal|all> [on|off]` | Close a portal for maintenance (ring of letters, sign, grille; players are pushed back) |
 | `/mp remove <server>` | Delete the portal to `<server>` |
 | `/mp style <server> <style>` | Change the look: `gate`, `rift`, `inferno`, `storm`, `void`, `frost` |
 | `/mp update` | Bake all portal views and deliver the resource pack (pack server only) |

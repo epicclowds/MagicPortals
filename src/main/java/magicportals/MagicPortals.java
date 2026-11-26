@@ -284,6 +284,14 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                     fallbackMode(c.getString("fallback"), c.getBoolean("fallback-blocks", false), "none"));
             portal.fallback = fallback.equals("world");
             portal.fill = fallback.equals("nether") || fallback.equals("end") ? fallback : "none";
+            // maintenance mode: closed, with a look (ring / text / bars), players are pushed back
+            portal.maintenance = p.getBoolean("maintenance", false);
+            portal.maintenancePush = p.getBoolean("maintenance-push", true);
+            portal.maintenanceLook = maintenanceLook(p.getString("maintenance-look", "ring,text"));
+            portal.maintenanceTitle = messages.get("maintenance.title");
+            portal.maintenanceRing = messages.get("maintenance.ring");
+            portal.maintenanceText = p.getString("maintenance-text", messages.get("maintenance.text"));
+            if (portal.maintenanceText.equalsIgnoreCase("none")) portal.maintenanceText = "";
             portals.add(portal);
         }
         // the view settings belong to the scene this portal shows, i.e. the snapshot "<target>@<server>"
@@ -308,6 +316,32 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         var parts = new ArrayList<String>();
         for (String key : VIEW_KEYS) if (view.contains(key)) parts.add(key + "=" + view.get(key));
         return String.join(";", parts);
+    }
+
+    /** Maintenance looks from "ring,text", "ring+bars", "all" …; unknown words are ignored. */
+    static Set<String> maintenanceLook(String text) {
+        var looks = new LinkedHashSet<String>();
+        for (String part : text.toLowerCase(Locale.ROOT).split("[,+ ]+")) {
+            if (part.equals("all") || part.equals("alle")) looks.addAll(List.of("ring", "text", "bars"));
+            else if (List.of("ring", "text", "bars").contains(part)) looks.add(part);
+        }
+        return looks;
+    }
+
+    /** /mp maintenance <portal|all> [on|off] – switches maintenance mode (toggles without on/off). */
+    private void maintenanceCommand(CommandSender sender, String[] args) {
+        if (args.length < 2) { sender.sendMessage(error("maintenance.usage")); return; }
+        List<String> ids = args[1].equalsIgnoreCase("all") ? portals.stream().map(p -> p.id).toList() : List.of(args[1]);
+        if (ids.isEmpty() || !getConfig().isConfigurationSection("portals." + ids.getFirst())) { sender.sendMessage(error("remove.unknown")); return; }
+        Boolean on = args.length >= 3 ? switch (args[2].toLowerCase(Locale.ROOT)) {
+            case "on", "an", "true", "ja" -> true; case "off", "aus", "false", "nein" -> false; default -> null; } : null;
+        for (String id : ids) {
+            boolean now = on != null ? on : !getConfig().getBoolean("portals." + id + ".maintenance", false);
+            getConfig().set("portals." + id + ".maintenance", now ? true : null);
+            sender.sendMessage(now ? text("maintenance.on", id) : Chat.success(messages.get("maintenance.off"), id));
+        }
+        saveConfig();
+        load();
     }
 
     /** Fallback mode from "fallback" (none/world/nether/end), else the old "fallback-blocks" flag, else the default. */
@@ -430,6 +464,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         long now = System.currentTimeMillis();
         if (cooldown.getOrDefault(player.getUniqueId(), 0L) > now) return;
         cooldown.put(player.getUniqueId(), now + 5000);
+        if (portal.maintenance && !(player.isSneaking() && player.hasPermission("magicportals.admin"))) { player.sendMessage(error("maintenance.blocked", portal.name)); return; }
         if (!portal.reachable()) { player.sendMessage(error("offline.message", portal.name)); return; }
         portal.playEnter(player);
         UUID id = player.getUniqueId();
@@ -698,6 +733,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             case "aktualisieren" -> "update";
             case "neuladen" -> "reload";
             case "einrichten" -> "setup";
+            case "wartung" -> "maintenance";
             default -> input.toLowerCase(Locale.ROOT);
         };
     }
@@ -766,12 +802,13 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                 if (!(sender instanceof Player player)) { sender.sendMessage(error("only.ingame")); return true; }
                 setup.command(player, Arrays.copyOfRange(args, 1, args.length));
             }
+            case "maintenance" -> maintenanceCommand(sender, args);
             case "edit" -> edit(sender, args);
             case "reload" -> { load(); pack.startWebServer(); sender.sendMessage(text("reload.done", portals.size())); }
             case "update" -> update(sender);
             default -> {
                 var lines = new ArrayList<Component>();
-                for (String help : List.of("help.setup", "help.list", "help.wand", "help.set", "help.edit", "help.remove", "help.style", "help.update", "help.reload")) {
+                for (String help : List.of("help.setup", "help.list", "help.wand", "help.set", "help.edit", "help.maintenance", "help.remove", "help.style", "help.update", "help.reload")) {
                     // "/mp command – description": command clickable (fills the chat line), description below in grey
                     String line = messages.get(help);
                     int dash = line.indexOf(" – ");
@@ -805,6 +842,10 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         EDITABLE.put("particles", List.of("0", "0.5", "1", "2", "3", "5"));
         EDITABLE.put("effects", List.of("true", "false"));
         EDITABLE.put("fallback", List.of("none", "nether", "end", "world"));
+        EDITABLE.put("maintenance", List.of("true", "false"));
+        EDITABLE.put("maintenance-look", List.of("ring", "text", "bars", "ring,text", "ring,bars", "text,bars", "all"));
+        EDITABLE.put("maintenance-push", List.of("true", "false"));
+        EDITABLE.put("maintenance-text", List.of("none"));
         EDITABLE.put("frame", List.of("none", "wall"));
         // the view through the portal (needs /mp update)
         EDITABLE.put("time", List.of("day", "sunset", "night"));
@@ -877,6 +918,10 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                     case "volume" -> c.getDouble(path + ".volume", 1.0);
                     case "particles" -> c.getDouble(path + ".particles", 1.0);
                     case "effects" -> c.getBoolean(path + ".effects", false);
+                    case "maintenance" -> c.getBoolean(path + ".maintenance", false);
+                    case "maintenance-look" -> String.join(",", maintenanceLook(c.getString(path + ".maintenance-look", "ring,text")));
+                    case "maintenance-push" -> c.getBoolean(path + ".maintenance-push", true);
+                    case "maintenance-text" -> c.getString(path + ".maintenance-text", messages.get("maintenance.text"));
                     case "fallback" -> fallbackMode(c.getString(path + ".fallback"), c.contains(path + ".fallback-blocks") ? c.getBoolean(path + ".fallback-blocks") : null, fallbackMode(c.getString("fallback"), c.getBoolean("fallback-blocks", false), "none"));
                     case "time" -> c.getString(path + ".view.time", "day");
                     case "fog" -> c.getDouble(path + ".view.fog", 1.0);
@@ -938,7 +983,9 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                 stored = n >= 1 && n <= Portal.MAX_SIZE ? n : null;
             }
             case "fallback" -> stored = EDITABLE.get("fallback").contains(value) ? value : null;
-            case "inside-view", "barriers", "label", "sound", "effects" -> stored = switch (value) { case "true", "on", "yes", "an", "ja" -> true; case "false", "off", "no", "aus", "nein" -> false; default -> null; };
+            case "maintenance-look" -> { var looks = maintenanceLook(value); stored = looks.isEmpty() ? null : String.join(",", looks); }
+            case "maintenance-text" -> stored = raw;
+            case "inside-view", "barriers", "label", "sound", "effects", "maintenance", "maintenance-push" -> stored = switch (value) { case "true", "on", "yes", "an", "ja" -> true; case "false", "off", "no", "aus", "nein" -> false; default -> null; };
             default -> stored = value.equals("none") ? "none" : value.equals("wall") ? "wall" : null;
         }
         if (stored == null) { sender.sendMessage(error("edit.invalid", raw, key, String.join(", ", EDITABLE.get(key)))); return; }
@@ -964,10 +1011,12 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
     @Override public List<String> onTabComplete(CommandSender sender, Command cmd, String label, String[] args) {
         String input = args[args.length - 1].toLowerCase(Locale.ROOT);
         List<String> options = List.of();
-        if (args.length == 1) options = List.of("setup", "list", "wand", "set", "edit", "remove", "style", "update", "reload");
+        if (args.length == 1) options = List.of("setup", "list", "wand", "set", "edit", "maintenance", "remove", "style", "update", "reload");
         else {
             String sub = subCommand(args[0]);
-            if (args.length == 2 && (sub.equals("remove") || sub.equals("style") || sub.equals("edit") || sub.equals("set")))
+            if (args.length == 2 && sub.equals("maintenance")) { var list = new ArrayList<>(portals.stream().map(p -> p.id).toList()); list.add("all"); options = list; }
+            else if (args.length == 3 && sub.equals("maintenance")) options = List.of("on", "off");
+            else if (args.length == 2 && (sub.equals("remove") || sub.equals("style") || sub.equals("edit") || sub.equals("set")))
                 options = portals.stream().map(p -> p.id).toList();
             else if (args.length == 2 && sub.equals("setup")) options = setup.completions();
             else if (args.length == 3 && sub.equals("set")) options = List.copyOf(knownServers());
