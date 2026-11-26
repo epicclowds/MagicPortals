@@ -68,7 +68,7 @@ A portal always comes in **pairs**: lobby → survival *and* survival → lobby.
    ```
    /mp set survival Survival
    ```
-   (`survival` is the target server's name from `velocity.toml`, `Survival` the label shown above the portal.)
+   (`survival` is the target server's name from `velocity.toml`, `Survival` its display name – shown above the portal with `label: true`.)
 3. On the survival server, do the same for the way back:
    ```
    /mp set lobby Lobby
@@ -105,7 +105,7 @@ All commands need `magicportals.admin` (default: op). Aliases: `/mp`, `/magicpor
 | `/mp list` | Portals on this server: target, position, style, online state, scene number |
 | `/mp wand` | Get the Portal Wand to mark an opening of any size (left-click / right-click the two corners) |
 | `/mp set <server> [name]` | Create or move the portal to `<server>`: into the opening marked with the wand (facing the side you stand on), otherwise 3 blocks in front of you (facing you) |
-| `/mp edit <server> [setting] [value]` | Show or change a portal's settings in game: `name`, `style`, `facing`, `width`, `height`, `inside-view`, `barriers`, `frame` (`none`/`wall`). Applied immediately; after `facing`/`width`/`height` run `/mp update` |
+| `/mp edit <server> [setting] [value]` | Show or change a portal's settings in game: `name`, `style`, `facing`, `width`, `height`, `inside-view`, `barriers`, `label`, `frame` (`none`/`wall`). Applied immediately; after `facing`/`width`/`height` run `/mp update` |
 | `/mp remove <server>` | Delete the portal to `<server>` |
 | `/mp style <server> <gate\|rift>` | Change the look of a portal |
 | `/mp update` | Bake all portal views and deliver the resource pack (pack server only) |

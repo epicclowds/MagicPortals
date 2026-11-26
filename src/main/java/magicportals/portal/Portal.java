@@ -33,6 +33,7 @@ public final class Portal {
     public final boolean rift;         // style "rift": floating dimensional crack instead of a gate
     public final boolean insideView;   // cameras can fly "into" the destination behind the opening
     public final boolean barriers;     // with insideView: invisible barriers keep players out of the space behind
+    public final boolean showLabel;    // floating name above the portal
     private final int anchor;          // local column of the anchor cell
     private final double ox, oy, oz;   // world position of the local origin
 
@@ -66,10 +67,10 @@ public final class Portal {
     public record Capture(String key, Snapshot front, Snapshot back) { }
 
     public Portal(Plugin plugin, World world, String target, String name, int x, int y, int z, Facing facing, int width, int height,
-                  Material outer, Material inner, boolean rift, boolean insideView, boolean barriers, String offlineLabel) {
+                  Material outer, Material inner, boolean rift, boolean insideView, boolean barriers, boolean showLabel, String offlineLabel) {
         this.plugin = plugin; this.world = world; this.target = target; this.name = name;
         this.x = x; this.y = y; this.z = z; this.facing = facing;
-        this.outer = outer; this.inner = inner; this.rift = rift; this.insideView = insideView; this.barriers = barriers;
+        this.outer = outer; this.inner = inner; this.rift = rift; this.insideView = insideView; this.barriers = barriers; this.showLabel = showLabel;
         this.width = Math.max(1, Math.min(MAX_SIZE, width));
         this.height = Math.max(1, Math.min(MAX_SIZE, height));
         this.anchor = (this.width - 1) / 2;
@@ -153,6 +154,7 @@ public final class Portal {
         });
         decoration.add(marker);
         setScene(scene);
+        if (!showLabel) return;
         double labelHeight = rift ? height * 1.53 + .5 : height + (outer != null ? 2.5 : 1.0), labelZ = rift || outer == null ? .5 : 1.2;
         label = world.spawn(at(width / 2.0, labelHeight, labelZ), TextDisplay.class, d -> {
             d.setPersistent(false); d.setBillboard(Display.Billboard.CENTER); d.setShadowed(true);

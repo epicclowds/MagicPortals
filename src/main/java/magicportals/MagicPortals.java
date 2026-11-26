@@ -199,7 +199,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                     Facing.parse(p.getString("facing", "south")), p.getInt("width", 3), p.getInt("height", 3),
                     noFrame ? null : material(p.getString("frame.outer"), Material.STONE_BRICKS),
                     noFrame ? null : material(p.getString("frame.inner"), Material.POLISHED_BLACKSTONE_BRICKS),
-                    style.equals("rift"), p.getBoolean("inside-view", false), p.getBoolean("barriers", false), messages.get("offline.sign")));
+                    style.equals("rift"), p.getBoolean("inside-view", false), p.getBoolean("barriers", false), p.getBoolean("label", false), messages.get("offline.sign")));
         }
         scenesVersion = -1;
         for (Portal p : portals) {
@@ -557,6 +557,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         EDITABLE.put("height", List.of("1", "2", "3", "4", "5", "6", "7"));
         EDITABLE.put("inside-view", List.of("true", "false"));
         EDITABLE.put("barriers", List.of("true", "false"));
+        EDITABLE.put("label", List.of("true", "false"));
         EDITABLE.put("frame", List.of("none", "wall"));
     }
 
@@ -579,6 +580,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                     case "height" -> c.getInt(path + ".height", 3);
                     case "inside-view" -> c.getBoolean(path + ".inside-view", false);
                     case "barriers" -> c.getBoolean(path + ".barriers", false);
+                    case "label" -> c.getBoolean(path + ".label", false);
                     default -> "none".equalsIgnoreCase(c.getString(path + ".frame")) ? "none" : "wall";
                 };
                 sender.sendMessage(Component.text("  " + key + ": ", NamedTextColor.GRAY).append(Component.text(String.valueOf(value))));
@@ -599,7 +601,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                 try { n = Integer.parseInt(value); } catch (NumberFormatException e) { n = 0; }
                 stored = n >= 1 && n <= Portal.MAX_SIZE ? n : null;
             }
-            case "inside-view", "barriers" -> stored = switch (value) { case "true", "on", "yes", "an", "ja" -> true; case "false", "off", "no", "aus", "nein" -> false; default -> null; };
+            case "inside-view", "barriers", "label" -> stored = switch (value) { case "true", "on", "yes", "an", "ja" -> true; case "false", "off", "no", "aus", "nein" -> false; default -> null; };
             default -> stored = value.equals("none") ? "none" : value.equals("wall") ? "wall" : null;
         }
         if (stored == null) { sender.sendMessage(error("edit.invalid", raw, key, String.join(", ", EDITABLE.get(key)))); return; }

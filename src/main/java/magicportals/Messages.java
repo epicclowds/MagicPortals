@@ -58,7 +58,7 @@ final class Messages {
             Map.entry("help.list", new String[]{"/magicportals list – portals on this server", "/magicportals list – Tore dieses Servers"}),
             Map.entry("help.set", new String[]{"/magicportals set <server> [name] – portal in the marked opening, or 3 blocks in front of you", "/magicportals set <Server> [Name] – Tor in der markierten Öffnung oder 3 Blöcke vor dir"}),
             Map.entry("help.remove", new String[]{"/magicportals remove <server>", "/magicportals remove <Server>"}),
-            Map.entry("help.edit", new String[]{"/magicportals edit <server> [setting] [value] – show or change name, style, facing, size, inside-view, barriers, frame", "/magicportals edit <Server> [Einstellung] [Wert] – Name, Stil, Richtung, Größe, inside-view, barriers, frame anzeigen oder ändern"}),
+            Map.entry("help.edit", new String[]{"/magicportals edit <server> [setting] [value] – show or change name, style, facing, size, inside-view, barriers, label, frame", "/magicportals edit <Server> [Einstellung] [Wert] – Name, Stil, Richtung, Größe, inside-view, barriers, label, frame anzeigen oder ändern"}),
             Map.entry("help.style", new String[]{"/magicportals style <server> <gate|rift> – look of the portal", "/magicportals style <Server> <gate|rift> – Aussehen des Tores"}),
             Map.entry("help.update", new String[]{"/magicportals update – bake scenes, build and deliver the resource pack", "/magicportals update – Szenen backen, Paket bauen und ausliefern"}),
             Map.entry("help.reload", new String[]{"/magicportals reload – reload config.yml", "/magicportals reload – config.yml neu einlesen"})

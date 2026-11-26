@@ -73,7 +73,8 @@ One entry per portal on this server. The key is the **target server**.
 
 | Key | Default | Description |
 |---|---|---|
-| `name` | target, capitalised | Label floating above the portal and used in messages. |
+| `name` | target, capitalised | Name used in messages and, with `label: true`, floating above the portal. |
+| `label` | `false` | `true` shows the name (and an "offline" note while the target is down) floating above the portal. |
 | `style` | `gate` | `gate` – opening in a thick stone wall. `rift` – floating dimensional crack. |
 | `x`, `y`, `z` | auto | Position of the portal (see below). If missing, MagicPortals places the portal on flat ground near the world spawn and writes the coordinates back. |
 | `facing` | `south` | Direction the opening faces, i.e. the side players walk in from: `south`, `north`, `east` or `west`. `/mp set` fills this in for you. |
@@ -91,7 +92,7 @@ What gets built:
 
 - **gate:** a wall of block displays reaching 2 blocks around the opening (amethyst rim, glowing glass edge). Invisible barriers in the wall stop players from walking through it. With `frame: none` nothing is built.
 - **rift:** no wall. A few invisible light blocks make the surroundings glow.
-- **both:** a hidden marker entity for the shader and a floating label; with `inside-view: true` (and `barriers: true`) also invisible barriers in the 3 blocks right behind the opening. Everything is removed again when the plugin stops; the world itself is not changed otherwise.
+- **both:** a hidden marker entity for the shader and, with `label: true`, a floating name; with `inside-view: true` (and `barriers: true`) also invisible barriers in the 3 blocks right behind the opening. Everything is removed again when the plugin stops; the world itself is not changed otherwise.
 
 **Counterparts.** A portal from A to B shows what is in front of the portal from B to A, and players arriving from A spawn in front of that portal. So every portal needs a counterpart on its target server.
 
