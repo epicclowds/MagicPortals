@@ -489,8 +489,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             // name in the plugin gradient, lore without the default italics
             meta.displayName(Component.text("✦ ", Chat.ACCENT).append(Chat.gradient("Portal Wand", true)).append(Component.text(" ✦", Chat.ACCENT))
                     .decoration(net.kyori.adventure.text.format.TextDecoration.ITALIC, false));
-            meta.lore(List.of(Component.empty(), wandLore(messages.get("wand.lore1")), wandLore(messages.get("wand.lore2")), wandLore(messages.get("wand.lore3")),
-                    Component.empty(), Chat.gradient("MagicPortals", false).decoration(net.kyori.adventure.text.format.TextDecoration.ITALIC, false)));
+            meta.lore(List.of(Component.empty(), wandLore(messages.get("wand.lore1")), wandLore(messages.get("wand.lore2")), wandLore(messages.get("wand.lore3"))));
             meta.setEnchantmentGlintOverride(true);
             // own model from the MagicPortals resource pack (a staff with a glowing crystal); off: plain golden pickaxe
             if (getConfig().getBoolean("wand-model", true)) meta.setItemModel(new org.bukkit.NamespacedKey("magicportals", "wand"));
