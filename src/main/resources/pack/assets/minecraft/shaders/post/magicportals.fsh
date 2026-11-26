@@ -29,8 +29,11 @@ float OPENING_W = 3.0, OPENING_H = 3.0;
 int gridX0 = DP_RX0 + 1;
 const float INSIDE_DEPTH = 3.0;   // camera counts as "inside" up to this depth behind the opening
 
+int DATA_ROW = 0;          // data row (= scene) of the portal being drawn
+float PORTAL_DIST = 0.0;   // distance from the eye to that portal's plane, the nearest portal wins
+
 float readData(int i) {
-    return dp_unpack(texelFetch(DataSampler, ivec2(i, 0), 0));
+    return dp_unpack(texelFetch(DataSampler, ivec2(i, DATA_ROW), 0));
 }
 
 int byte8(float v) { return int(round(v * 255.0)); }
@@ -96,6 +99,8 @@ vec3 SKY_LIGHT_COLOR = vec3(1.0);
 vec3 SKY_HORIZON = DP_HORIZON, SKY_ZENITH = DP_ZENITH;
 
 void setView(int scene) {
+    // defaults first: several portals are drawn one after another
+    SKY_HORIZON = DP_HORIZON; SKY_ZENITH = DP_ZENITH; SKY_SCALE = 1.0; SKY_LIGHT_COLOR = vec3(1.0);
     vec4 a = DP_VIEW[scene * 4], b = DP_VIEW[scene * 4 + 1], c = DP_VIEW[scene * 4 + 2], e = DP_VIEW[scene * 4 + 3];
     VIEW_BLUR = e.x;
     VIEW_TIME = int(a.x + 0.5);
@@ -825,10 +830,10 @@ vec3 styleBack(int style, vec2 p, float time) {
     return mix(vec3(0.55, 0.78, 0.92), vec3(0.85, 0.95, 1.0), n * 0.7 + facet * 0.3) - vec3(0.25, 0.15, 0.05) * crack;
 }
 
-void main() {
-    vec4 base = texture(InSampler, texCoord);
-    fragColor = base;
-    if (readData(29) != DP_MAGIC) return;
+// Draws one portal (data row DATA_ROW) into outColor; false if this pixel shows nothing of it.
+bool renderPortal(vec4 base, out vec4 outColor) {
+    outColor = base;
+    if (readData(29) != DP_MAGIC) return false;
 
     mat4 proj = mat4(vec4(readData(0), readData(1), readData(2), readData(3)), vec4(readData(4), readData(5), readData(6), readData(7)),
                      vec4(readData(8), readData(9), readData(10), readData(11)), vec4(readData(12), readData(13), readData(14), readData(15)));
@@ -851,7 +856,7 @@ void main() {
     STORM_FLASH = style == 3 ? stormFlash(time) : 0.0;
     FLAME_HEIGHT = OPENING_H * 1.55;
     ICE_HEIGHT = OPENING_H * 1.6;
-    if (scene < 0 || scene >= DP_SCENES) return;
+    if (scene < 0 || scene >= DP_SCENES) return false;
     setView(scene);
 
     // The eye is the point the projection maps to w = 0. View bobbing lives in the projection
@@ -882,36 +887,39 @@ void main() {
 
     if (eye.z > 0.0 && style == 0) {
         // gate in a wall, seen from the front: only pixels whose ray hits the opening
-        if (d.z >= -1e-4) return;
+        if (d.z >= -1e-4) return false;
         float tPlane = -eye.z / d.z;
+        PORTAL_DIST = tPlane;
         vec3 hit = eye + d * tPlane;
-        if (!inOpening(hit.xy)) return;
-        if (sceneDist < tPlane - 0.03) return;
+        if (!inOpening(hit.xy)) return false;
+        if (sceneDist < tPlane - 0.03) return false;
         vec3 color = viewMarch(hit + d * 1e-3, d, scene, time);
         float edge = min(min(hit.x, OPENING_W - hit.x), min(hit.y, OPENING_H - hit.y));
         color += vec3(0.35, 0.85, 1.0) * exp(-edge * 22.0) * 0.55;
-        fragColor = vec4(color, BLUR);
+        outColor = vec4(color, BLUR); return true;
     } else if (eye.z > 0.0 && style == 1) {
         // rift seen from the front: destination world inside, glowing edge around it
-        if (d.z >= -1e-4) return;
+        if (d.z >= -1e-4) return false;
         float tPlane = -eye.z / d.z;
+        PORTAL_DIST = tPlane;
         vec3 hit = eye + d * tPlane;
-        if (sceneDist < tPlane - 0.03) return;
+        if (sceneDist < tPlane - 0.03) return false;
         float angle;
         float edgeDist = riftDistance(hit.xy, time, angle);
-        if (edgeDist > 1.2) return;
+        if (edgeDist > 1.2) return false;
         vec3 color = edgeDist < 0.0 ? viewMarch(hit + d * 1e-3, d, scene, time) : base.rgb * riftHem(edgeDist, angle);
         if (edgeDist < 0.0) color *= mix(1.0, 0.55, exp(edgeDist * 9.0));          // darker rim inside
-        fragColor = vec4(color + riftGlow(hit.xy, edgeDist, angle, time), BLUR);
+        outColor = vec4(color + riftGlow(hit.xy, edgeDist, angle, time), BLUR); return true;
     } else if (eye.z > 0.0 && style >= 2) {
         // inferno, storm, void, frost seen from the front
-        if (d.z >= -1e-4) return;
+        if (d.z >= -1e-4) return false;
         float tPlane = -eye.z / d.z;
+        PORTAL_DIST = tPlane;
         vec3 hit = eye + d * tPlane;
-        if (sceneDist < tPlane - 0.03) return;
+        if (sceneDist < tPlane - 0.03) return false;
         float angle;
         float e = styleDistance(style, hit.xy, time, angle);
-        if (e > styleReach(style)) return;
+        if (e > styleReach(style)) return false;
         vec3 color;
         if (e < 0.0) {
             vec3 start = hit;
@@ -930,33 +938,54 @@ void main() {
             }
             color = styleInside(style, viewMarch(start + d * 1e-3, d, scene, time), hit.xy, e, time);
         } else color = styleOutside(style, hit.xy, e, angle, time, base.rgb);
-        fragColor = vec4(color + styleGlow(style, hit.xy, e, angle, time), BLUR);
+        outColor = vec4(color + styleGlow(style, hit.xy, e, angle, time), BLUR); return true;
     } else if (insideView && eye.z > -INSIDE_DEPTH && eye.z <= 0.0 && inOpening(eye.xy)) {
         // The camera flew through the opening: the whole screen shows the destination world in all
         // directions, without the portal, as if you had really walked through. In game there are
         // barriers there, so normal players never get here.
-        fragColor = vec4(viewMarch(eye, d, scene, time), BLUR);
+        outColor = vec4(viewMarch(eye, d, scene, time), BLUR); return true;
     } else if (eye.z <= 0.0 && style == 1) {
         // rift seen from behind: glowing edge around a dark starry nebula
-        if (d.z <= 1e-4) return;
+        if (d.z <= 1e-4) return false;
         float tPlane = -eye.z / d.z;
+        PORTAL_DIST = tPlane;
         vec3 hit = eye + d * tPlane;
-        if (sceneDist < tPlane - 0.03) return;
+        if (sceneDist < tPlane - 0.03) return false;
         float angle;
         float edgeDist = riftDistance(hit.xy, time, angle);
-        if (edgeDist > 1.2) return;
+        if (edgeDist > 1.2) return false;
         vec3 color = edgeDist < 0.0 ? riftNebula(hit.xy, time) : base.rgb * riftHem(edgeDist, angle);
-        fragColor = vec4(color + riftGlow(hit.xy, edgeDist, angle, time), 1.0);
+        outColor = vec4(color + riftGlow(hit.xy, edgeDist, angle, time), 1.0); return true;
     } else if (eye.z <= 0.0 && style >= 2) {
         // inferno, storm, void, frost seen from behind: their own surface instead of the destination
-        if (d.z <= 1e-4) return;
+        if (d.z <= 1e-4) return false;
         float tPlane = -eye.z / d.z;
+        PORTAL_DIST = tPlane;
         vec3 hit = eye + d * tPlane;
-        if (sceneDist < tPlane - 0.03) return;
+        if (sceneDist < tPlane - 0.03) return false;
         float angle;
         float e = styleDistance(style, hit.xy, time, angle);
-        if (e > styleReach(style)) return;
+        if (e > styleReach(style)) return false;
         vec3 color = e < 0.0 ? styleBack(style, hit.xy, time) : styleOutside(style, hit.xy, e, angle, time, base.rgb);
-        fragColor = vec4(color + styleGlow(style, hit.xy, e, angle, time), 1.0);
+        outColor = vec4(color + styleGlow(style, hit.xy, e, angle, time), 1.0); return true;
+    }
+    return false;
+}
+
+void main() {
+    vec4 base = texture(InSampler, texCoord);
+    fragColor = base;
+    // every portal on screen has its own data row; draw them all, the nearest one wins per pixel
+    float nearest = 1e9;
+    for (int row = 0; row < 16; row++) {
+        DATA_ROW = row;
+        if (readData(29) != DP_MAGIC) continue;
+        BLUR = 0.0;
+        PORTAL_DIST = 0.0;
+        vec4 color;
+        if (renderPortal(base, color) && PORTAL_DIST < nearest) {
+            nearest = PORTAL_DIST;
+            fragColor = color;
+        }
     }
 }

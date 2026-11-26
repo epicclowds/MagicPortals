@@ -14,7 +14,7 @@ layout(location = 0) out vec4 fragColor;
 void main() {
     ivec2 at = ivec2(gl_FragCoord.xy);
     vec4 color = texture(InSampler, texCoord);
-    if (at.y <= 1 && at.x < DP_PIXEL + 1) {
+    if (at.y <= 16 && at.x < DP_PIXEL + 1) {   // one data row per scene
         color = vec4(0.0);
     }
     fragColor = color;

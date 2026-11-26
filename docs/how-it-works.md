@@ -29,13 +29,13 @@ Up to 16 scenes share these textures; `magicportals_scene.glsl` tells the shader
 
 Every portal has an invisible, tiny glowing block display at the lower left corner of its opening (seen from behind). Its glow colour encodes the scene number, the facing, the style, the options and the size of the opening.
 
-Glowing entities are drawn a second time into Minecraft's *entity outline* buffer. MagicPortals' version of the outline vertex shader recognises the marker colour and, instead of drawing it, moves it to a 32 × 1 pixel strip at the edge of the screen. Each of these pixels stores one float bit-exactly: the projection matrix, the camera rotation, the camera position relative to the portal, scene, style and game time.
+Glowing entities are drawn a second time into Minecraft's *entity outline* buffer. MagicPortals' version of the outline vertex shader recognises the marker colour and, instead of drawing it, moves it to a 32 × 1 pixel strip at the edge of the screen – one row per scene, so several portals can be on screen at the same time. Each of these pixels stores one float bit-exactly: the projection matrix, the camera rotation, the camera position relative to the portal, scene, style and game time.
 
 ## 4. The portal shader
 
 The entity-outline post effect runs whenever a glowing entity is on screen. MagicPortals adds a pass in front of the vanilla outline passes:
 
-1. Read the 32 data pixels. If there is no valid marker, leave the image unchanged.
+1. For each of the 16 data rows: read the 32 data pixels; rows without a valid marker are skipped. Every visible portal is drawn, the nearest one wins per pixel.
 2. Rebuild the view ray of every pixel from the inverse projection and turn it into the portal's own frame (facing). The eye position is taken from the projection itself, so view bobbing and every depth convention are handled correctly.
 3. Intersect the ray with the portal plane. If it hits the opening (the rectangular gate or the jagged rift outline) and the depth buffer shows nothing in front of it, continue; otherwise keep the normal image.
 4. March the ray through the voxel grid (DDA) and shade the first hit: face texture, tint, face shading, sky and block light, water transparency, plants as two crossed planes. Rays that leave the grid continue over the far-terrain heightfield.

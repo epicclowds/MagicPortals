@@ -39,7 +39,8 @@ void main() {
     //@ULTIMATEUI_HUD
 
     // The portal marker is a tiny glowing block display at the corner of the portal opening.
-    // Instead of drawing it, its vertices are moved to a 32x1 pixel strip at the screen edge and
+    // Instead of drawing it, its vertices are moved to a 32x1 pixel strip at the screen edge (one row per
+    // scene, so several portals can be on screen at once) and
     // write camera position, rotation, projection, scene, style and game time into the outline buffer.
     int scene = dp_marker_scene(Color);
     if (scene >= 0) {
@@ -62,7 +63,8 @@ void main() {
         if ((quad & 1) == 1) {
             offset = offset.yx;   // other winding, so the quad is never culled
         }
-        vec2 size = vec2(float(DP_PIXEL), 1.0) * 2.0 / ScreenSize;
+        vec2 size = vec2(float(DP_PIXEL), 1.0) * 2.0 / ScreenSize;   // one cell = one pixel
+        offset.y += float(scene & 15);   // data row = scene number
         gl_Position = vec4(vec2(-1.0) + offset * size, 0.001, 1.0);
     }
 }
