@@ -516,16 +516,16 @@ public final class SceneBaker {
 
     private void write(List<int[]> scenes, List<double[]> views, List<FarTerrain> fars, Path output) throws IOException {
         // far terrain first: its top blocks may add shapes and textures
-        BufferedImage farColor = new BufferedImage(FarTerrain.COLUMNS, FarTerrain.ROWS * scenes.size(), BufferedImage.TYPE_INT_ARGB);
-        BufferedImage farHeight = new BufferedImage(FarTerrain.COLUMNS, FarTerrain.ROWS * scenes.size(), BufferedImage.TYPE_INT_ARGB);
-        BufferedImage farCeiling = new BufferedImage(FarTerrain.COLUMNS, FarTerrain.ROWS * scenes.size(), BufferedImage.TYPE_INT_ARGB);
-        BufferedImage farCeilingColor = new BufferedImage(FarTerrain.COLUMNS, FarTerrain.ROWS * scenes.size(), BufferedImage.TYPE_INT_ARGB);
+        BufferedImage farColor = new BufferedImage(FarTerrain.COLUMNS, FarTerrain.TOTAL_ROWS * scenes.size(), BufferedImage.TYPE_INT_ARGB);
+        BufferedImage farHeight = new BufferedImage(FarTerrain.COLUMNS, FarTerrain.TOTAL_ROWS * scenes.size(), BufferedImage.TYPE_INT_ARGB);
+        BufferedImage farCeiling = new BufferedImage(FarTerrain.COLUMNS, FarTerrain.TOTAL_ROWS * scenes.size(), BufferedImage.TYPE_INT_ARGB);
+        BufferedImage farCeilingColor = new BufferedImage(FarTerrain.COLUMNS, FarTerrain.TOTAL_ROWS * scenes.size(), BufferedImage.TYPE_INT_ARGB);
         for (int s = 0; s < fars.size(); s++) {
             FarTerrain far = fars.get(s);
             int[] colors = new int[far.palette.size()];
             for (int p = 0; p < colors.length; p++) colors[p] = topColor(far.palette.get(p));
-            for (int r = 0; r < FarTerrain.ROWS; r++) for (int c = 0; c < FarTerrain.COLUMNS; c++) {
-                int i = FarTerrain.index(c, r), py = r + s * FarTerrain.ROWS;
+            for (int r = 0; r < FarTerrain.TOTAL_ROWS; r++) for (int c = 0; c < FarTerrain.COLUMNS; c++) {
+                int i = FarTerrain.index(c, r), py = r + s * FarTerrain.TOTAL_ROWS;
                 boolean exists = far.height[i] != FarTerrain.NONE && colors[far.block[i]] >= 0;
                 int h = exists ? far.height[i] + 2048 : 0;
                 farHeight.setRGB(c, py, 0xFF000000 | ((h >> 8) & 255) << 16 | (h & 255) << 8 | (exists ? 1 : 0));
@@ -599,13 +599,14 @@ public final class SceneBaker {
                 #define DP_ATLAS_COLUMNS %d
                 #define DP_FAR_COLUMNS %d
                 #define DP_FAR_ROWS %d
+                #define DP_FAR_BACK %d
                 #define DP_FAR_STEP %d.0
                 #define DP_HORIZON vec3(0.75, 0.85, 1.0)
                 #define DP_ZENITH vec3(0.47, 0.65, 1.0)
                 // per scene: (time, fog, weather, tint strength), (tint rgb, custom fog), (fog rgb, cave), (blur, 0, 0, 0)
                 const vec4 DP_VIEW[%d] = vec4[](%s);
                 #endif
-                """.formatted(W, H, D, DB, DT, HB, RX0, GY0, count, ATLAS_COLUMNS, FarTerrain.COLUMNS, FarTerrain.ROWS, FarTerrain.STEP, count * 4, viewArray(views)));
+                """.formatted(W, H, D, DB, DT, HB, RX0, GY0, count, ATLAS_COLUMNS, FarTerrain.COLUMNS, FarTerrain.TOTAL_ROWS, FarTerrain.BACK_ROWS, FarTerrain.STEP, count * 4, viewArray(views)));
 
         Path post = output.resolve("assets/minecraft/post_effect");
         Files.createDirectories(post);

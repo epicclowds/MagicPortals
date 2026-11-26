@@ -134,6 +134,13 @@ vec3 lightOf(int raw) {
     vec3 color = mix(SKY_LIGHT_COLOR, vec3(1.0, 0.86, 0.66), clamp((blockLevel - skyLevel) / 4.0, 0.0, 1.0));
     return color * lightFactor(level);
 }
+// Colour of fog and of the distance. In caves (nether) it is a dark version of the fog colour, so open
+// spaces fade into darkness like in the real nether instead of glowing.
+vec3 fogColor(vec3 d) {
+    if (CAVE) return VIEW_FOG_COLOR * 0.32;
+    return VIEW_FOG_CUSTOM ? VIEW_FOG_COLOR * (VIEW_TIME == 2 ? 0.45 : 1.0) : mix(SKY_HORIZON, SKY_ZENITH, smoothstep(-0.05, 0.55, d.y));
+}
+
 
 vec3 sky(vec3 d) {
     vec3 c = mix(SKY_HORIZON, SKY_ZENITH, smoothstep(-0.05, 0.55, d.y));
@@ -145,13 +152,11 @@ vec3 sky(vec3 d) {
         float h = fract(sin(dot(cell, vec3(12.9898, 78.233, 37.719))) * 43758.5453);
         c += vec3(0.9, 0.92, 1.0) * step(0.985, h) * smoothstep(0.5, 0.1, length(fract(n) - 0.5)) * smoothstep(0.0, 0.2, d.y);
     }
+    if (CAVE) return fogColor(d);   // no sky in caves: dark distance
     if (VIEW_FOG_CUSTOM) c = mix(c, VIEW_FOG_COLOR, clamp(0.35 + 0.15 * VIEW_FOG, 0.0, 1.0));
     return c;
 }
 
-vec3 fogColor(vec3 d) {
-    return VIEW_FOG_CUSTOM ? VIEW_FOG_COLOR * (VIEW_TIME == 2 ? 0.45 : 1.0) : sky(d);
-}
 
 // Fog towards the horizon. Backwards (+z) the scene only reaches DP_DB blocks,
 // so the fog starts earlier there to hide the edge. Denser fog starts closer.
@@ -159,8 +164,8 @@ vec3 fogColor(vec3 d) {
 // gets a light aerial haze. fog > 1 lets everything fade out earlier. Backwards (+z, only seen from inside)
 // the scene ends after DP_DB blocks, so that edge always fades out.
 float fog(float dist, vec3 d) {
-    float back = d.z > 0.0 ? smoothstep(float(DP_DB) * 0.7, float(DP_DB) * 0.95, dist) * smoothstep(0.0, 0.5, d.z) : 0.0;
-    if (CAVE && VIEW_FOG <= 1.0) return max(back, smoothstep(24.0, 230.0, dist) * 0.85 * max(VIEW_FOG, 0.3));   // nether haze
+    float back = 0.0;   // behind the portal the far terrain continues, no fade needed
+    if (CAVE && VIEW_FOG <= 1.0) return max(back, smoothstep(40.0, 320.0, dist) * 0.6 * VIEW_FOG);   // light nether haze, none with fog 0
     if (VIEW_FOG <= 1.0) return back;
     float end = 300.0 / VIEW_FOG;
     return max(back, smoothstep(end * 0.1, end, dist));
@@ -201,7 +206,7 @@ float farTexel(int c, int r, int scene) {
 // Continuous cell coordinate of a local point; cell centres are whole numbers.
 vec2 farCell(vec3 p) {
     float a = float((int(OPENING_W) - 1) / 2);
-    return vec2((p.x - a - 0.5) / DP_FAR_STEP + float(DP_FAR_COLUMNS / 2), (-p.z - 0.5) / DP_FAR_STEP);
+    return vec2((p.x - a - 0.5) / DP_FAR_STEP + float(DP_FAR_COLUMNS / 2), (-p.z - 0.5) / DP_FAR_STEP + float(DP_FAR_BACK));
 }
 
 // Smoothly interpolated surface height – the interpolation gives the soft, blurred look.
@@ -249,11 +254,11 @@ vec2 farUV(vec3 p, int scene) {
 }
 
 vec3 farView(vec3 p0, vec3 d, int scene, float tBefore) {
-    float maxDepth = float(DP_FAR_ROWS) * DP_FAR_STEP;
+    float maxDepth = float(DP_FAR_ROWS - DP_FAR_BACK) * DP_FAR_STEP, maxBack = float(DP_FAR_BACK) * DP_FAR_STEP;
     float t = 0.0, prevT = 0.0;
     for (int n = 0; n < 220; n++) {
         vec3 p = p0 + d * t;
-        if (-p.z > maxDepth || p.z > 1.0 || p.y > 330.0) break;
+        if (-p.z > maxDepth || p.z > maxBack || p.y > 330.0) break;
         if (farSolid(p, scene)) {
             float a = prevT, b = t;
             for (int k = 0; k < 6; k++) {
@@ -435,7 +440,7 @@ float BLUR = 0.0;
 vec3 viewMarch(vec3 start, vec3 d, int scene, float time) {
     vec3 c = march(start, d, scene);
     // depth of field: things far away are drawn out of focus by the blur pass (magicportals_blur)
-    BLUR = clamp(VIEW_BLUR * smoothstep(14.0, 110.0, MARCH_T), 0.0, 1.0);
+    BLUR = clamp(VIEW_BLUR * smoothstep(8.0, 70.0, MARCH_T), 0.0, 1.0);
     c = weather(c, start, d, time);
     if (VIEW_WEATHER == 1) c *= 0.85;   // overcast
     if (VIEW_TINT_STRENGTH > 0.0) {

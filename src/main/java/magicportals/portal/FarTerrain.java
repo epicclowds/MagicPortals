@@ -10,18 +10,19 @@ import java.util.*;
  * ceiling above and its bottom block. The shader draws it as a soft, slightly blurred landscape so the view
  * reaches far without fog.
  * <p>
- * Cell (c, r): sideways rx = (c - COLUMNS/2) * STEP (viewer's frame, like {@link Snapshot}), distance behind
- * the portal plane d = r * STEP. Heights are relative to the portal floor; {@link #NONE} = no data.
+ * Cell (c, row): sideways rx = (c - COLUMNS/2) * STEP (viewer's frame, like {@link Snapshot}), distance behind
+ * the portal plane d = (row - BACK_ROWS) * STEP (negative: in front of it). Heights are relative to the portal floor; {@link #NONE} = no data.
  */
 public final class FarTerrain {
-    public static final int STEP = 2, COLUMNS = 128, ROWS = 120, MAGIC = 0x4D504655;
-    private static final int OLD_MAGIC = 0x4D504654;
+    /** ROWS in front of the portal, BACK_ROWS behind it (seen when a camera flies inside and looks back). */
+    public static final int STEP = 2, COLUMNS = 128, ROWS = 120, BACK_ROWS = 40, TOTAL_ROWS = ROWS + BACK_ROWS, MAGIC = 0x4D504656;
+    private static final int OLD_MAGIC = 0x4D504655;   // older formats are skipped and recaptured within 5 minutes
     public static final short NONE = Short.MIN_VALUE;
 
     /** The world has a ceiling: the view gets a rock ceiling and nether haze instead of sky. */
     public boolean cave;
-    public final short[] height = new short[COLUMNS * ROWS], block = new short[COLUMNS * ROWS];
-    public final short[] ceiling = new short[COLUMNS * ROWS], ceilingBlock = new short[COLUMNS * ROWS];
+    public final short[] height = new short[COLUMNS * TOTAL_ROWS], block = new short[COLUMNS * TOTAL_ROWS];
+    public final short[] ceiling = new short[COLUMNS * TOTAL_ROWS], ceilingBlock = new short[COLUMNS * TOTAL_ROWS];
     public final List<String> palette = new ArrayList<>();
     private final Map<String, Short> ids = new HashMap<>();
 
@@ -46,7 +47,7 @@ public final class FarTerrain {
 
     /** Format: MAGIC, cave flag, palette size, palette (block states), then per cell height, block, ceiling, ceiling block. */
     public byte[] toBytes() {
-        var buffer = new ByteArrayOutputStream(COLUMNS * ROWS * 8 + 4096);
+        var buffer = new ByteArrayOutputStream(COLUMNS * TOTAL_ROWS * 8 + 4096);
         try (var out = new DataOutputStream(buffer)) {
             out.writeInt(MAGIC);
             out.writeBoolean(cave);
@@ -63,8 +64,8 @@ public final class FarTerrain {
         var far = new FarTerrain();
         try (var in = new DataInputStream(new ByteArrayInputStream(bytes))) {
             int magic = in.readInt();
-            if (magic != MAGIC && magic != OLD_MAGIC) throw new IOException("Invalid far terrain");
-            boolean withCeiling = magic == MAGIC;
+            if (magic != MAGIC) throw new IOException(magic == OLD_MAGIC ? "old format, will be recaptured" : "Invalid far terrain");
+            boolean withCeiling = true;
             if (withCeiling) far.cave = in.readBoolean();
             int n = in.readInt();
             for (int i = 0; i < n; i++) {

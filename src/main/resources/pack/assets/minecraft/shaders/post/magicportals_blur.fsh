@@ -25,7 +25,7 @@ void main() {
         return;
     }
     vec2 size = vec2(textureSize(InSampler, 0));
-    float radius = c.a * size.y * 0.0075;   // up to ~8 px at 1080p
+    float radius = c.a * size.y * 0.011;    // up to ~12 px at 1080p
     vec3 sum = c.rgb;
     float total = 1.0;
     // golden-angle spiral; only portal pixels count, weighted by their own blur so sharp near

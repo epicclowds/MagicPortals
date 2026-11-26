@@ -275,11 +275,11 @@ public final class Portal {
      * Must be called on the main thread.
      */
     public java.util.concurrent.CompletableFuture<FarTerrain> captureFar() {
-        int columns = FarTerrain.COLUMNS, rows = FarTerrain.ROWS, step = FarTerrain.STEP;
+        int columns = FarTerrain.COLUMNS, rows = FarTerrain.TOTAL_ROWS, step = FarTerrain.STEP;
         int[] wx = new int[columns * rows], wz = new int[columns * rows];
         var chunks = new HashMap<Long, java.util.concurrent.CompletableFuture<ChunkSnapshot>>();
         for (int r = 0; r < rows; r++) for (int c = 0; c < columns; c++) {
-            int rx = (c - columns / 2) * step, d = r * step;
+            int rx = (c - columns / 2) * step, d = (r - FarTerrain.BACK_ROWS) * step;
             // mirrored like Snapshot.captureFront: the viewer over there looks through and sees what lies in front of this portal
             Location l = at(width - 1 - anchor - rx + .5, 0, 1 + d + .5);
             int i = FarTerrain.index(c, r);
