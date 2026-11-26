@@ -49,7 +49,7 @@ resource-pack:
 |---|---|---|
 | `server` | – | **Required.** Name of this server exactly as listed under `[servers]` in `velocity.toml`. |
 | `language` | `en` | Language of in-game messages: `en` or `de`. |
-| `fallback-blocks` | `false` | Default for all portals; each portal can set its own `fallback-blocks`. For players without the resource pack (or with Iris/OptiFine shader packs): the server sends the destination's blocks behind the portal as client-side blocks. Costs bandwidth; leave off if everyone uses the pack. |
+| `fallback` | `none` | Default for all portals (`none`, `nether`, `end`, `world`), see `fallback` under portals. The old `fallback-blocks: true` still works and means `world`. For players without the resource pack (or with Iris/OptiFine shader packs): the server sends the destination's blocks behind the portal as client-side blocks. Costs bandwidth; leave off if everyone uses the pack. |
 | `wand-model` | `true` | The Portal Wand (`/mp wand`) uses its own animated model from the MagicPortals pack – a staff with a glowing violet-cyan crystal. Works with Oraxen, ItemsAdder and the built-in web server, no extra plugin needed. `false`: plain golden pickaxe, e.g. if a server does not get the pack. |
 
 ## `exchange`
@@ -80,7 +80,7 @@ One entry per portal on this server. The key is the portal's **name**; classic c
 | `volume` | `1.0` | Volume of those sounds, `0` – `4` (above 1 they also carry further). |
 | `particles` | `1.0` | Amount of particles, `0` (none) – `5`. |
 | `effects` | `false` | `true` turns on the style's effect on nearby players (see [Styles](#styles)): burning, frozen screen, darkness, camera jolt. Only visual, no damage. |
-| `fallback-blocks` | global setting | Also send the destination as client-side blocks behind this portal, for players with shader packs (Iris/OptiFine) or without the pack. |
+| `fallback` | global `fallback` | What players **without the shader** see (shader packs like Iris/Complementary, or no server pack): `none` (default), `nether` – the opening filled with nether portal blocks, `end` – filled with end gateway blocks (starfield), `world` – the destination as client-side blocks behind the portal. The blocks only exist on the clients; players with the shader see the real view drawn over them. |
 | `style` | `gate` | The look, see [Styles](#styles): `gate`, `rift`, `inferno`, `storm`, `void`, `frost`. |
 | `x`, `y`, `z` | auto | Position of the portal (see below). If missing, MagicPortals places the portal on flat ground near the world spawn and writes the coordinates back. |
 | `facing` | `south` | Direction the opening faces, i.e. the side players walk in from: `south`, `north`, `east` or `west`. `/mp set` fills this in for you. |

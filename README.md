@@ -38,7 +38,7 @@
 | Clients | Minecraft Java **26.3**, with the server resource pack accepted |
 | Optional | Oraxen or ItemsAdder for pack delivery, MySQL/MariaDB for the exchange |
 
-> **Shader packs:** Iris/OptiFine shader packs disable the core shaders of resource packs, so players using them see an empty portal. Turn on `fallback-blocks` if that matters to you (see [Troubleshooting](docs/troubleshooting.md)).
+> **Shader packs:** Iris/OptiFine shader packs disable the core shaders of resource packs, so players using them see an empty portal. Set `fallback: nether` or `end` to give them a portal surface instead (see [Troubleshooting](docs/troubleshooting.md)).
 
 ## Quick start
 

@@ -209,6 +209,7 @@ public final class Portal {
 
     public void tearDown() {
         clearEffects();
+        if (!filled.isEmpty()) { var real = fillBlocks(true); for (UUID id : filled) { Player p = Bukkit.getPlayer(id); if (p != null && p.getWorld() == world) p.sendMultiBlockChange(real); } filled.clear(); }
         for (Player p : world.getPlayers()) { var v = views.get(p.getUniqueId()); if (v != null) reset(p, v); }
         views.clear();
         for (var e : decoration) e.remove();
@@ -498,6 +499,45 @@ public final class Portal {
 
     /** Send the destination as client-side blocks too (for players without the shader); option "fallback-blocks". */
     public boolean fallback;
+
+    /**
+     * Portal surface for players without the shader (option "fallback": nether / end): the opening is filled
+     * with nether portal or end gateway blocks, only on the clients. Players with the shader do not see it –
+     * the shader draws the destination over it.
+     */
+    public String fill = "none";
+    private final Set<UUID> filled = new HashSet<>();
+
+    private Map<Position, BlockData> fillBlocks(boolean real) {
+        var changes = new HashMap<Position, BlockData>();
+        BlockData surface = null;
+        if (!real) {
+            if (fill.equals("end")) surface = Material.END_GATEWAY.createBlockData();
+            else {
+                var portal = (org.bukkit.block.data.Orientable) Material.NETHER_PORTAL.createBlockData();
+                // the portal blocks lie in the plane of the opening
+                portal.setAxis(facing == Facing.SOUTH || facing == Facing.NORTH ? org.bukkit.Axis.X : org.bukkit.Axis.Z);
+                surface = portal;
+            }
+        }
+        for (int i = 0; i < width; i++) for (int j = 0; j < height; j++) {
+            Block b = cell(i, j, 0);
+            if (!b.getType().isAir()) continue;   // only empty cells of the opening
+            changes.put(Position.block(b.getX(), b.getY(), b.getZ()), real ? b.getBlockData() : surface);
+        }
+        return changes;
+    }
+
+    /** Every 10 ticks: send the surface to players near the portal, take it back from players who left. */
+    public void updateFill(Player p, int tick) {
+        if (fill.equals("none")) return;
+        boolean near = p.getWorld() == world && p.getLocation().distanceSquared(at(width / 2.0, height / 2.0, 0)) < 64 * 64;
+        UUID id = p.getUniqueId();
+        if (near && (filled.add(id) || tick % 100 == 0)) p.sendMultiBlockChange(fillBlocks(false));   // resent now and then: chunk updates overwrite it
+        else if (!near && filled.remove(id) && p.getWorld() == world) p.sendMultiBlockChange(fillBlocks(true));
+    }
+
+    public void resetFill(Player p) { filled.remove(p.getUniqueId()); }
 
     /**
      * Plays the sound of a slot if sounds are enabled for this portal, scaled by its volume. A custom sound
