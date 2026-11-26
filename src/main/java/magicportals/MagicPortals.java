@@ -53,6 +53,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         saveDefaultConfig();
         createSoundFolder();
         pack = new ResourcePack(this);
+        setup = new SetupAssistant(this);
         Bukkit.getMessenger().registerOutgoingPluginChannel(this, "BungeeCord");
         Bukkit.getPluginManager().registerEvents(this, this);
         var command = getCommand("magicportals");
@@ -75,14 +76,42 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
 
     // ---------- work off the main thread ----------
 
-    private interface Task<T> { T run(Exchange exchange) throws Exception; }
+    interface Task<T> { T run(Exchange exchange) throws Exception; }
+
+    <T> void runAsync(Task<T> task) { async(task, null); }
+    <T> void runAsync(Task<T> task, Consumer<T> then) { async(task, then); }
+    org.bukkit.inventory.ItemStack wandItem() { return wand(); }
+
+    private SetupAssistant setup;
+    private void setupOnJoin(Player player) { setup.onJoin(player); }
+
+    /** Exchange key of the "please rebuild the pack" request (set by the setup assistant on any server). */
+    static final String UPDATE_REQUEST = "network@update";
+    private boolean updateScheduled;
+
+    /** Rebuilds the pack soon: here if this is the pack server, else via a request the pack server picks up. */
+    void requestUpdate() {
+        if (pack.enabled()) scheduleUpdate();
+        else runAsync(ex -> { ex.saveSnapshot(UPDATE_REQUEST, "request", Long.toString(System.currentTimeMillis()).getBytes(java.nio.charset.StandardCharsets.UTF_8)); return null; });
+    }
+
+    /** Runs /mp update in 15 s – time for the new portals to store their snapshots and far terrain. */
+    private void scheduleUpdate() {
+        if (updateScheduled) return;
+        updateScheduled = true;
+        Bukkit.getScheduler().runTaskLater(this, () -> {
+            updateScheduled = false;
+            if (updating) { scheduleUpdate(); return; }
+            update(Bukkit.getConsoleSender());
+        }, 300);
+    }
 
     /** Runs the task asynchronously and hands the result back on the main thread. */
     private int farMinutes;
 
     /** Captures the far terrain of a portal and stores it (kind "far"), every 5 minutes and on (re)load. */
     private void saveFar(Portal p) {
-        String key = Portal.key(server, p.target);
+        String key = p.ownKey(server);
         p.captureFar().thenAccept(far -> async(ex -> { ex.saveSnapshot(key, Exchange.FAR, far.toBytes()); return null; }, null))
                 .exceptionally(e -> { getLogger().warning("Far terrain of " + key + ": " + e); return null; });
     }
@@ -215,10 +244,13 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
 
         var section = c.getConfigurationSection("portals");
         var viewData = new LinkedHashMap<String, byte[]>();
-        if (section != null) for (String target : section.getKeys(false)) {
-            ConfigurationSection p = section.getConfigurationSection(target);
+        if (section != null) for (String id : section.getKeys(false)) {
+            ConfigurationSection p = section.getConfigurationSection(id);
             if (p == null) continue;
-            viewData.put(Portal.key(target, server), viewSettings(p).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            // "target" (server) defaults to the portal name: classic configs keyed by target server keep working
+            String target = p.getString("target", id), link = p.getString("link");
+            if (link != null && (link.isBlank() || link.equalsIgnoreCase("none"))) link = null;
+            viewData.put(Portal.key(target, server, link), viewSettings(p).getBytes(java.nio.charset.StandardCharsets.UTF_8));
             int[] pos;
             if (p.contains("x") && p.contains("y") && p.contains("z")) pos = new int[]{p.getInt("x"), p.getInt("y"), p.getInt("z")};
             else {
@@ -227,13 +259,13 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                 saveConfig();
                 getLogger().info("Portal to " + target + " placed automatically at " + pos[0] + " " + pos[1] + " " + pos[2]);
             }
-            String name = p.getString("name", target.substring(0, 1).toUpperCase(Locale.ROOT) + target.substring(1));
+            String name = p.getString("name", id.substring(0, 1).toUpperCase(Locale.ROOT) + id.substring(1));
             Style style = Style.parse(p.getString("style", "gate"));
             if (style == null) { getLogger().warning("Unknown style for portal " + target + ": " + p.getString("style") + " – using gate"); style = Style.GATE; }
             boolean noFrame = "none".equalsIgnoreCase(p.getString("frame"));
             World portalWorld = p.contains("world") ? Bukkit.getWorld(p.getString("world")) : world;
             if (portalWorld == null) { getLogger().warning("Portal to " + target + ": world " + p.getString("world") + " not found – skipped"); continue; }
-            Portal portal = new Portal(this, portalWorld, target, name, pos[0], pos[1], pos[2],
+            Portal portal = new Portal(this, portalWorld, id, target, link, name, pos[0], pos[1], pos[2],
                     Facing.parse(p.getString("facing", "south")), p.getInt("width", 3), p.getInt("height", 3),
                     noFrame ? null : material(p.getString("frame.outer"), Material.STONE_BRICKS),
                     noFrame ? null : material(p.getString("frame.inner"), Material.POLISHED_BLACKSTONE_BRICKS),
@@ -254,7 +286,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             p.build();
             save(p.captureAll(server));
             saveFar(p);
-            getLogger().info("Portal " + server + " -> " + p.target + " at " + p.x + " " + p.y + " " + p.z + " (" + p.style.id + ")");
+            getLogger().info("Portal " + p.id + ": " + server + " -> " + p.target + (p.link == null ? "" : " #" + p.link) + " at " + p.x + " " + p.y + " " + p.z + " (" + p.style.id + ")");
         }
         sync();
     }
@@ -303,7 +335,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
 
     // ---------- sync with the other servers ----------
 
-    private record SyncResult(Set<String> online, long scenesVersion, Map<String, Integer> scenes,
+    private record SyncResult(Set<String> online, long scenesVersion, Map<String, Integer> scenes, boolean updateRequested,
                               Map<String, byte[]> remoteViews, Map<String, Long> remoteVersions) { }
 
     /** Every 5 seconds: own heartbeat, who is online, new scene numbers, optionally the other sides' views. */
@@ -311,9 +343,10 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         if (syncing) return;
         syncing = true;
         boolean fallback = getConfig().getBoolean("fallback-blocks", false);
+        boolean packServer = pack.enabled();
         long knownScenes = scenesVersion;
         var knownRemote = new HashMap<String, Long>();
-        for (Portal p : portals) knownRemote.put(p.target, p.remoteVersion());
+        for (Portal p : portals) knownRemote.put(p.sceneKey(server), p.remoteVersion());
         String self = server;
         var ex = exchange;
         Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
@@ -326,14 +359,17 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                 var views = new HashMap<String, byte[]>();
                 var versions = new HashMap<String, Long>();
                 if (fallback) for (var e : knownRemote.entrySet()) {
-                    String key = Portal.key(e.getKey(), self);
+                    String key = e.getKey();
                     long v = ex.snapshotVersion(key, Exchange.FRONT);
                     if (v != 0 && v != e.getValue()) {
                         byte[] data = ex.loadSnapshot(key, Exchange.FRONT);
                         if (data != null) { views.put(e.getKey(), data); versions.put(e.getKey(), v); }
                     }
                 }
-                result = new SyncResult(online, version, scenes, views, versions);
+                // a setup on another server asks the pack server to rebuild the pack
+                boolean requested = packServer && ex.snapshotVersion(UPDATE_REQUEST, "request") != 0;
+                if (requested) ex.deleteSnapshots(UPDATE_REQUEST);
+                result = new SyncResult(online, version, scenes, requested, views, versions);
             } catch (IOException e) { getLogger().warning("Sync: " + e.getMessage()); }
             var done = result;
             if (!isEnabled()) return;
@@ -342,12 +378,14 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                 if (done == null || ex != exchange) return;
                 for (Portal p : portals) {
                     p.setReachable(done.online().contains(p.target));
-                    byte[] view = done.remoteViews().get(p.target);
-                    if (view != null) p.setRemoteView(view, done.remoteVersions().get(p.target));
+                    onlineServers = done.online();
+                    byte[] view = done.remoteViews().get(p.sceneKey(server));
+                    if (view != null) p.setRemoteView(view, done.remoteVersions().get(p.sceneKey(server)));
                 }
+                if (done.updateRequested()) { getLogger().info("Pack rebuild requested by a portal setup"); scheduleUpdate(); }
                 if (done.scenes() != null) {
                     scenesVersion = done.scenesVersion();
-                    for (Portal p : portals) p.setScene(done.scenes().get(Portal.key(p.target, server)));
+                    for (Portal p : portals) p.setScene(done.scenes().get(p.sceneKey(server)));
                 }
             });
         });
@@ -381,7 +419,9 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         String self = server;
         player.playSound(player.getLocation(), "minecraft:block.portal.travel", .35f, 1.25f);
         // Store the arrival first, then connect, so the target server finds it when the player joins.
-        async(ex -> { ex.setArrival(portal.target, id, self); return true; }, ok -> {
+        // origin "<server>#<link>": the target server places the player at the portal with the same link
+        String origin = portal.link == null ? self : self + "#" + portal.link;
+        async(ex -> { ex.setArrival(portal.target, id, origin); return true; }, ok -> {
             if (!player.isOnline()) return;
             var bytes = new ByteArrayOutputStream();
             try (var out = new DataOutputStream(bytes)) { out.writeUTF("Connect"); out.writeUTF(portal.target); }
@@ -399,15 +439,33 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         UUID id = player.getUniqueId();
         String self = server;
         async(ex -> Optional.ofNullable(ex.takeArrival(self, id)), origin -> {
-            if (origin.isEmpty() || !player.isOnline()) return;
-            Portal portal = portals.stream().filter(p -> p.target.equals(origin.get())).findFirst().orElse(portals.isEmpty() ? null : portals.getFirst());
-            if (portal == null) return;
+            if (!player.isOnline()) return;
+            if (origin.isEmpty()) { setupOnJoin(player); return; }
+            Portal portal = counterpart(origin.get());
+            if (portal == null) {
+                // linked portal not set up on this server yet: the player stays at the spawn
+                if (origin.get().contains("#")) player.sendMessage(text("link.missing", origin.get().substring(origin.get().indexOf('#') + 1)));
+                setupOnJoin(player);
+                return;
+            }
             Location arrival = portal.arrival();
             player.teleport(arrival);
             player.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, 70, 0, false, false, false));
             player.playSound(arrival, "minecraft:block.amethyst_block.chime", .7f, 1.1f);
             player.playSound(arrival, "minecraft:block.portal.trigger", .25f, 1.6f);
+            setupOnJoin(player);
         });
+    }
+
+    /** The portal on this server that is the counterpart of a portal on origin ("<server>" or "<server>#<link>"). */
+    private Portal counterpart(String origin) {
+        int hash = origin.indexOf('#');
+        String from = hash < 0 ? origin : origin.substring(0, hash), link = hash < 0 ? null : origin.substring(hash + 1);
+        for (Portal p : portals) if (p.target.equals(from) && Objects.equals(p.link, link)) return p;
+        if (link != null) return null;
+        // classic pairing by server name
+        for (Portal p : portals) if (p.target.equals(from)) return p;
+        return portals.isEmpty() ? null : portals.getFirst();
     }
 
     @EventHandler public void onQuit(PlayerQuitEvent e) {
@@ -451,11 +509,94 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         Location[] sel = selections.computeIfAbsent(e.getPlayer().getUniqueId(), k -> new Location[2]);
         sel[left ? 0 : 1] = block;
         e.getPlayer().sendMessage(text(left ? "wand.pos1" : "wand.pos2", block.getBlockX(), block.getBlockY(), block.getBlockZ()));
-        if (sel[0] != null && sel[1] != null) showSelection(e.getPlayer(), sel[0], sel[1]);
+        if (sel[0] != null && sel[1] != null) { showSelection(e.getPlayer(), sel[0], sel[1]); setup.selectionChanged(e.getPlayer()); }
     }
 
     @EventHandler(ignoreCancelled = true) public void onWandBreak(org.bukkit.event.block.BlockBreakEvent e) {
         if (isWand(e.getPlayer().getInventory().getItemInMainHand())) e.setCancelled(true);
+    }
+
+    /** Servers seen in the network (heartbeats) plus the targets of this server's portals. */
+    Set<String> knownServers() {
+        var known = new TreeSet<>(onlineServers);
+        for (Portal p : portals) known.add(p.target);
+        known.remove(server);
+        return known;
+    }
+
+    private Set<String> onlineServers = Set.of();
+
+    /**
+     * Creates or moves a portal: into the opening marked with the wand (facing the player's side), otherwise
+     * 3 blocks in front of the player. id = name in the config, target = server, link = connection ID shared
+     * with the counterpart (null = classic pairing). Returns false and tells the player why if it fails.
+     */
+    boolean createPortal(Player player, String id, String target, String link, String display) {
+        if (!id.matches("[A-Za-z0-9_-]{1,32}") || target.equals(server) || !target.matches("[A-Za-z0-9_-]+")) {
+            player.sendMessage(error("set.invalid", target.equals(server) ? target : id)); return false;
+        }
+        if (link != null && !link.matches("[A-Za-z0-9_-]{1,32}")) { player.sendMessage(error("link.invalid", link)); return false; }
+        for (Portal p : portals)
+            if (!p.id.equals(id) && p.target.equals(target) && Objects.equals(p.link, link)) {
+                player.sendMessage(error(link == null ? "set.duplicate" : "link.taken", target, link == null ? p.id : link)); return false;
+            }
+        String path = "portals." + id;
+        Location[] sel = selections.get(player.getUniqueId());
+        if (sel != null && sel[0] != null && sel[1] != null) {
+            // opening marked with the wand: exactly these blocks, no frame (built by hand), facing the side the player stands on
+            Location a = sel[0], b = sel[1];
+            Placement pl = a.getWorld() == b.getWorld() && a.getWorld() == player.getWorld() ? placement(a, b, player.getLocation()) : null;
+            if (pl == null) { player.sendMessage(error("wand.flat")); return false; }
+            if (pl.width > Portal.MAX_SIZE || pl.height > Portal.MAX_SIZE) { player.sendMessage(error("wand.size", Portal.MAX_SIZE)); return false; }
+            getConfig().set(path + ".x", pl.x);
+            getConfig().set(path + ".y", pl.y);
+            getConfig().set(path + ".z", pl.z);
+            getConfig().set(path + ".facing", pl.facing.name().toLowerCase(Locale.ROOT));
+            getConfig().set(path + ".width", pl.width);
+            getConfig().set(path + ".height", pl.height);
+            getConfig().set(path + ".frame", "none");
+            selections.remove(player.getUniqueId());
+            player.sendMessage(text("set.selection", id, pl.width, pl.height, facingName(pl.facing)));
+        } else {
+            // 3 blocks in the look direction, the opening facing the player
+            Location l = player.getLocation();
+            var look = l.getDirection();
+            Facing facing = Facing.towards(-look.getX(), -look.getZ());
+            getConfig().set(path + ".x", l.getBlockX() - 3 * facing.zx);
+            getConfig().set(path + ".y", l.getBlockY());
+            getConfig().set(path + ".z", l.getBlockZ() - 3 * facing.zz);
+            getConfig().set(path + ".facing", facing.name().toLowerCase(Locale.ROOT));
+            player.sendMessage(text("set.done", id, facingName(facing)));
+        }
+        // the portal stands in the world the player is in (overworld, nether, end, any other world)
+        getConfig().set(path + ".world", player.getWorld().equals(Bukkit.getWorlds().getFirst()) ? null : player.getWorld().getName());
+        getConfig().set(path + ".target", id.equals(target) ? null : target);
+        getConfig().set(path + ".link", link);
+        if (!getConfig().contains(path + ".style")) getConfig().set(path + ".style", "gate");
+        if (display != null) getConfig().set(path + ".name", display);
+        saveConfig();
+        load();
+        return true;
+    }
+
+    /** Sets a single option of a portal in the config (used by the setup assistant) without reloading. */
+    void setPortalOption(String id, String key, Object value) { getConfig().set("portals." + id + "." + key, value); }
+    void saveAndReload() { saveConfig(); load(); }
+    String serverName() { return server; }
+    Messages messages() { return messages; }
+    Map<UUID, Location[]> selections() { return selections; }
+    List<Portal> portals() { return portals; }
+    ResourcePack pack() { return pack; }
+    Exchange exchange() { return exchange; }
+    Component textOf(String key, Object... values) { return text(key, values); }
+    Component errorOf(String key, Object... values) { return error(key, values); }
+
+    /** Sends a player to another server of the network. */
+    void connect(Player player, String target) {
+        var bytes = new ByteArrayOutputStream();
+        try (var out = new DataOutputStream(bytes)) { out.writeUTF("Connect"); out.writeUTF(target); }
+        catch (IOException e) { return; }
+        player.sendPluginMessage(this, "BungeeCord", bytes.toByteArray());
     }
 
     /** A portal placed into a marked opening: anchor cell (config x/y/z), size and facing. */
@@ -524,6 +665,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             case "bearbeiten" -> "edit";
             case "aktualisieren" -> "update";
             case "neuladen" -> "reload";
+            case "einrichten" -> "setup";
             default -> input.toLowerCase(Locale.ROOT);
         };
     }
@@ -534,51 +676,24 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             case "list" -> {
                 sender.sendMessage(text("list.header", server, exchangeName()));
                 if (portals.isEmpty()) sender.sendMessage(text("list.none"));
-                for (Portal p : portals) sender.sendMessage(Component.text("  → " + p.target + "  " + p.x + " " + p.y + " " + p.z + (p.world() == world ? "" : " [" + p.world().getName() + "]") + " " + facingName(p.facing) + "  " + messages.get("style." + p.style.id) + "  ")
+                for (Portal p : portals) sender.sendMessage(Component.text("  " + p.id + (p.id.equals(p.target) && p.link == null ? "" : " → " + p.target) + (p.link == null ? "" : " #" + p.link) + "  " + p.x + " " + p.y + " " + p.z + (p.world() == world ? "" : " [" + p.world().getName() + "]") + " " + facingName(p.facing) + "  " + messages.get("style." + p.style.id) + "  ")
                         .append(p.reachable() ? Component.text(messages.get("list.online"), NamedTextColor.GREEN) : Component.text(messages.get("list.offline"), NamedTextColor.RED))
                         .append(Component.text(p.scene() == null ? messages.get("list.noscene") : messages.get("list.scene", p.scene()), NamedTextColor.GRAY)));
             }
             case "set" -> {
                 if (!(sender instanceof Player player)) { sender.sendMessage(error("only.ingame")); return true; }
                 if (args.length < 2) { sender.sendMessage(error("set.usage")); return true; }
-                String target = args[1];
-                if (target.equals(server) || !target.matches("[A-Za-z0-9_-]+")) { sender.sendMessage(error("set.invalid", target)); return true; }
-                String path = "portals." + target;
-                Location[] sel = selections.get(player.getUniqueId());
-                if (sel != null && sel[0] != null && sel[1] != null) {
-                    // opening marked with the wand: exactly these blocks, no frame (built by hand),
-                    // facing the side the player stands on
-                    Location a = sel[0], b = sel[1];
-                    Placement pl = a.getWorld() == b.getWorld() && a.getWorld() == player.getWorld() ? placement(a, b, player.getLocation()) : null;
-                    if (pl == null) { sender.sendMessage(error("wand.flat")); return true; }
-                    if (pl.width > Portal.MAX_SIZE || pl.height > Portal.MAX_SIZE) { sender.sendMessage(error("wand.size", Portal.MAX_SIZE)); return true; }
-                    getConfig().set(path + ".x", pl.x);
-                    getConfig().set(path + ".y", pl.y);
-                    getConfig().set(path + ".z", pl.z);
-                    getConfig().set(path + ".facing", pl.facing.name().toLowerCase(Locale.ROOT));
-                    getConfig().set(path + ".width", pl.width);
-                    getConfig().set(path + ".height", pl.height);
-                    getConfig().set(path + ".frame", "none");
-                    selections.remove(player.getUniqueId());
-                    sender.sendMessage(text("set.selection", target, pl.width, pl.height, facingName(pl.facing)));
-                } else {
-                    // 3 blocks in the look direction, the opening facing the player
-                    Location l = player.getLocation();
-                    var look = l.getDirection();
-                    Facing facing = Facing.towards(-look.getX(), -look.getZ());
-                    getConfig().set(path + ".x", l.getBlockX() - 3 * facing.zx);
-                    getConfig().set(path + ".y", l.getBlockY());
-                    getConfig().set(path + ".z", l.getBlockZ() - 3 * facing.zz);
-                    getConfig().set(path + ".facing", facing.name().toLowerCase(Locale.ROOT));
-                    sender.sendMessage(text("set.done", target, facingName(facing)));
-                }
-                // the portal stands in the world the player is in (overworld, nether, end, any other world)
-                getConfig().set(path + ".world", player.getWorld().equals(Bukkit.getWorlds().getFirst()) ? null : player.getWorld().getName());
-                if (!getConfig().contains(path + ".style")) getConfig().set(path + ".style", "gate");
-                if (args.length >= 3) getConfig().set(path + ".name", String.join(" ", Arrays.copyOfRange(args, 2, args.length)));
-                saveConfig();
-                load();
-                sender.sendMessage(text("set.counterpart", target, server));
+                // /mp set <name> <server> [id] [display name]   – linked portal
+                // /mp set <server> [display name]               – classic: name = server, paired with "the portal back to me"
+                boolean linked = args.length >= 3 && knownServers().contains(args[2]);
+                String id = args[1], target = linked ? args[2] : args[1];
+                String link = linked && args.length >= 4 ? args[3] : null;
+                int nameFrom = linked ? 4 : 2;
+                String display = args.length > nameFrom ? String.join(" ", Arrays.copyOfRange(args, nameFrom, args.length)) : null;
+                if (!createPortal(player, id, target, link, display)) return true;
+                if (link != null)
+                    sender.sendMessage(text("set.linked", id, target, link, server));
+                else sender.sendMessage(text("set.counterpart", target, server));
             }
             case "wand" -> {
                 if (!(sender instanceof Player player)) { sender.sendMessage(error("only.ingame")); return true; }
@@ -587,9 +702,10 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
             }
             case "remove" -> {
                 if (args.length < 2 || !getConfig().contains("portals." + args[1])) { sender.sendMessage(error("remove.unknown")); return true; }
+                ConfigurationSection before = getConfig().getConfigurationSection("portals." + args[1]);
+                String key = Portal.key(server, before == null ? args[1] : before.getString("target", args[1]), before == null ? null : before.getString("link"));
                 getConfig().set("portals." + args[1], null);
                 saveConfig();
-                String key = Portal.key(server, args[1]);
                 load();
                 async(ex -> { ex.deleteSnapshots(key); return null; }, null);
                 sender.sendMessage(text("remove.done", args[1]));
@@ -603,11 +719,15 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                 load();
                 sender.sendMessage(text("style.done", args[1], style));
             }
+            case "setup" -> {
+                if (!(sender instanceof Player player)) { sender.sendMessage(error("only.ingame")); return true; }
+                setup.command(player, Arrays.copyOfRange(args, 1, args.length));
+            }
             case "edit" -> edit(sender, args);
             case "reload" -> { load(); pack.startWebServer(); sender.sendMessage(text("reload.done", portals.size())); }
             case "update" -> update(sender);
             default -> {
-                for (String help : List.of("help.list", "help.wand", "help.set", "help.edit", "help.remove", "help.style", "help.update", "help.reload")) sender.sendMessage(text(help));
+                for (String help : List.of("help.setup", "help.list", "help.wand", "help.set", "help.edit", "help.remove", "help.style", "help.update", "help.reload")) sender.sendMessage(text(help));
             }
         }
         return true;
@@ -617,6 +737,8 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
     private static final Map<String, List<String>> EDITABLE = new LinkedHashMap<>();
     static {
         EDITABLE.put("name", List.of());
+        EDITABLE.put("target", List.of());
+        EDITABLE.put("link", List.of("none"));
         EDITABLE.put("style", Style.ids());
         EDITABLE.put("facing", List.of("south", "north", "east", "west"));
         EDITABLE.put("width", List.of("1", "2", "3", "4", "5", "6", "7"));
@@ -678,7 +800,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         if (args.length < 2) { sender.sendMessage(error("edit.usage")); return; }
         String path = "portals." + args[1];
         if (!getConfig().isConfigurationSection(path)) { sender.sendMessage(error("remove.unknown")); return; }
-        Portal portal = portals.stream().filter(p -> p.target.equals(args[1])).findFirst().orElse(null);
+        Portal portal = portals.stream().filter(p -> p.id.equals(args[1])).findFirst().orElse(null);
         if (args.length < 4) {
             // show the current settings
             var c = getConfig();
@@ -687,6 +809,8 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                 if (key.startsWith("sound.")) continue;   // shown below, only the ones that are set
                 Object value = switch (key) {
                     case "name" -> portal != null ? portal.name : c.getString(path + ".name", args[1]);
+                    case "target" -> c.getString(path + ".target", args[1]);
+                    case "link" -> c.getString(path + ".link", "none");
                     case "style" -> c.getString(path + ".style", "gate");
                     case "facing" -> c.getString(path + ".facing", "south");
                     case "width" -> c.getInt(path + ".width", 3);
@@ -734,6 +858,8 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         Object stored;
         switch (key) {
             case "name" -> stored = raw;
+            case "target" -> stored = raw.matches("[A-Za-z0-9_-]+") && !raw.equals(server) ? raw : null;
+            case "link" -> stored = value.equals("none") ? "none" : raw.matches("[A-Za-z0-9_-]{1,32}") ? raw : null;
             case "style" -> { Style s = Style.parse(value); stored = s == null ? null : s.id; }
             case "time", "weather" -> stored = EDITABLE.get(key).contains(value) ? value : null;
             case "fog-color", "tint" -> stored = color(value);
@@ -756,6 +882,13 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
         boolean view = VIEW_KEYS.contains(key);
         if (key.equals("frame") && stored.equals("wall")) getConfig().set(path + ".frame", null);   // default wall
         else if (view) getConfig().set(path + ".view." + key, "none".equals(stored) ? null : stored);
+        else if (key.equals("link") || key.equals("target")) {
+            // the portal gets a new exchange key: remove what it stored under the old one
+            String oldKey = Portal.key(server, getConfig().getString(path + ".target", args[1]), getConfig().getString(path + ".link"));
+            if (key.equals("link")) getConfig().set(path + ".link", "none".equals(stored) ? null : stored);
+            else getConfig().set(path + ".target", stored.equals(args[1]) ? null : stored);
+            async(ex -> { ex.deleteSnapshots(oldKey); return null; }, null);
+        }
         else getConfig().set(path + "." + key, stored);
         saveConfig();
         load();
@@ -767,11 +900,13 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
     @Override public List<String> onTabComplete(CommandSender sender, Command cmd, String label, String[] args) {
         String input = args[args.length - 1].toLowerCase(Locale.ROOT);
         List<String> options = List.of();
-        if (args.length == 1) options = List.of("list", "wand", "set", "edit", "remove", "style", "update", "reload");
+        if (args.length == 1) options = List.of("setup", "list", "wand", "set", "edit", "remove", "style", "update", "reload");
         else {
             String sub = subCommand(args[0]);
             if (args.length == 2 && (sub.equals("remove") || sub.equals("style") || sub.equals("edit") || sub.equals("set")))
-                options = portals.stream().map(p -> p.target).toList();
+                options = portals.stream().map(p -> p.id).toList();
+            else if (args.length == 2 && sub.equals("setup")) options = setup.completions();
+            else if (args.length == 3 && sub.equals("set")) options = List.copyOf(knownServers());
             else if (args.length == 3 && sub.equals("style")) options = Style.ids();
             else if (args.length == 3 && sub.equals("edit")) options = List.copyOf(EDITABLE.keySet());
             else if (args.length == 4 && sub.equals("edit")) {

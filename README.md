@@ -87,6 +87,21 @@ A portal always comes in **pairs**: lobby → survival *and* survival → lobby.
 
 Run `/mp update` again whenever you add, move or remove portals, or after big builds around a portal: the view through a portal is a snapshot, refreshed by every update.
 
+### Several portals between the same servers – connection IDs
+
+A lobby can have, say, one portal into the survival overworld, one into its Nether and one into its End. Each portal gets a **name** and a **connection ID**; two portals with the same ID on two servers belong together:
+
+```
+Lobby:     /mp set smp-end smp end1        portal "smp-end", leads to server smp, ID end1
+Survival:  /mp set lobby-end lobby end1    the counterpart in the End, same ID
+```
+
+Until the counterpart exists, walking through takes you to the target server's spawn – handy while setting things up. Portals without an ID pair up the classic way (the portal back to me).
+
+### Guided setup – `/mp setup`
+
+`/mp setup` walks you through a linked pair with clickable chat buttons: mark the opening → pick the target server → name and ID (suggested) → style, sound, effects → go through to the other server, where the assistant continues by itself → mark the counterpart → done. At the end the resource pack is rebuilt automatically, even when you finish on a server that does not build the pack.
+
 ### Your own frame, any size – the Portal Wand
 
 1. Build your frame with an empty opening, in any of the four directions. Any rectangle up to 7×7 blocks.
@@ -105,7 +120,9 @@ All commands need `magicportals.admin` (default: op). Aliases: `/mp`, `/magicpor
 |---|---|
 | `/mp list` | Portals on this server: target, position, style, online state, scene number |
 | `/mp wand` | Get the Portal Wand to mark an opening of any size (left-click / right-click the two corners) |
-| `/mp set <server> [name]` | Create or move the portal to `<server>`: into the opening marked with the wand (facing the side you stand on), otherwise 3 blocks in front of you (facing you) |
+| `/mp setup` | Guided setup of a linked portal pair across two servers (clickable) |
+| `/mp set <name> <server> [id] [display name]` | Create or move a portal with a connection ID; the counterpart on `<server>` uses the same ID |
+| `/mp set <server> [name]` | Classic: create or move the portal to `<server>`, paired with the portal back. Into the opening marked with the wand (facing the side you stand on), otherwise 3 blocks in front of you (facing you) |
 | `/mp edit <server> [setting] [value]` | Show or change a portal's settings in game: `name`, `style`, `facing`, `width`, `height`, `inside-view`, `barriers`, `label`, `sound`, `volume`, `particles`, `effects`, `frame` (`none`/`wall`) custom sounds `sound.<slot>` ([details](docs/configuration.md#custom-sounds)) and the [view](docs/configuration.md#view) settings `time`, `fog`, `fog-color`, `tint`, `tint-strength`, `weather`. Applied immediately; after `facing`/`width`/`height` run `/mp update` |
 | `/mp remove <server>` | Delete the portal to `<server>` |
 | `/mp style <server> <style>` | Change the look: `gate`, `rift`, `inferno`, `storm`, `void`, `frost` |

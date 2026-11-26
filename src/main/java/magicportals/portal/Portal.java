@@ -27,7 +27,8 @@ import org.joml.Vector3f;
  */
 public final class Portal {
     public static final int MAX_SIZE = 7;
-    public final String target, name;
+    /** id = name of the portal in the config; link = connection ID shared with its counterpart (null: classic pairing by server). */
+    public final String id, target, link, name;
     public final int x, y, z, width, height;
     public final Facing facing;
     public final Style style;
@@ -71,10 +72,10 @@ public final class Portal {
     /** A finished capture of this portal, stored by the plugin off the main thread. */
     public record Capture(String key, Snapshot front, Snapshot back) { }
 
-    public Portal(Plugin plugin, World world, String target, String name, int x, int y, int z, Facing facing, int width, int height,
+    public Portal(Plugin plugin, World world, String id, String target, String link, String name, int x, int y, int z, Facing facing, int width, int height,
                   Material outer, Material inner, Style style, boolean insideView, boolean barriers, boolean showLabel,
                   boolean sound, float volume, double particleAmount, boolean effects, String offlineLabel) {
-        this.plugin = plugin; this.world = world; this.target = target; this.name = name;
+        this.plugin = plugin; this.world = world; this.id = id; this.target = target; this.link = link; this.name = name;
         this.x = x; this.y = y; this.z = z; this.facing = facing;
         this.outer = outer; this.inner = inner; this.style = style; this.rift = style != Style.GATE; this.insideView = insideView;
         this.sound = sound; this.volume = Math.max(0f, volume);
@@ -91,6 +92,15 @@ public final class Portal {
 
     /** Exchange key: "<server>@<target>" = the view in front of the portal from server to target. */
     public static String key(String server, String target) { return server + "@" + target; }
+
+    /** Exchange key with a connection ID: "<server>@<target>#<link>". */
+    public static String key(String server, String target, String link) { return link == null ? key(server, target) : key(server, target) + "#" + link; }
+
+    /** Key of what this portal captures (its front), shown by the counterpart. */
+    public String ownKey(String server) { return key(server, target, link); }
+
+    /** Key of the scene this portal shows: what its counterpart on the target server captures. */
+    public String sceneKey(String server) { return key(target, server, link); }
 
     public boolean near(int px, int pz, int distance) { return Math.abs(px - x) < distance && Math.abs(pz - z) < distance; }
     public World world() { return world; }
@@ -243,7 +253,7 @@ public final class Portal {
         behind = newBehind;
         compare();
         captureFront = captureBehind = captureBack = null;
-        return new Capture(key(server, target), front, back);
+        return new Capture(ownKey(server), front, back);
     }
 
     private void captureSlice(Snapshot front, Snapshot behindSnapshot, Snapshot back, int d) {
@@ -262,7 +272,7 @@ public final class Portal {
         if (captureFront == null) return null;
         for (int n = 0; n < 2 && slice < Snapshot.DEPTH; n++, slice++) captureSlice(captureFront, captureBehind, captureBack, slice);
         if (slice < Snapshot.DEPTH) return null;
-        var done = new Capture(key(server, target), captureFront, captureBack);
+        var done = new Capture(ownKey(server), captureFront, captureBack);
         behind = captureBehind;
         compare();
         captureFront = captureBehind = captureBack = null;

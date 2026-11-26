@@ -69,7 +69,7 @@ What is stored: a heartbeat per server (every 5 s), arrivals while a player swit
 
 ## `portals`
 
-One entry per portal on this server. The key is the **target server**.
+One entry per portal on this server. The key is the portal's **name**; classic configs use the target server as name.
 
 | Key | Default | Description |
 |---|---|---|
@@ -82,6 +82,8 @@ One entry per portal on this server. The key is the **target server**.
 | `style` | `gate` | The look, see [Styles](#styles): `gate`, `rift`, `inferno`, `storm`, `void`, `frost`. |
 | `x`, `y`, `z` | auto | Position of the portal (see below). If missing, MagicPortals places the portal on flat ground near the world spawn and writes the coordinates back. |
 | `facing` | `south` | Direction the opening faces, i.e. the side players walk in from: `south`, `north`, `east` or `west`. `/mp set` fills this in for you. |
+| `target` | the name | Server the portal leads to. Can be left out when the name is the server name. |
+| `link` | – | Connection ID. Two portals with the same ID (on two servers, each targeting the other) form a pair. Without an ID the portal pairs with "the portal back to me". |
 | `world` | main world | World the portal stands in, e.g. `world_nether` or `world_the_end`. `/mp set` fills this in with the world you are in. |
 | `frame.outer` | `STONE_BRICKS` | Outer wall blocks (style `gate`). Any block material. |
 | `frame.inner` | `POLISHED_BLACKSTONE_BRICKS` | Ring around the opening (style `gate`). |
