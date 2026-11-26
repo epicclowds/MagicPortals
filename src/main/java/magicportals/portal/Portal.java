@@ -163,7 +163,7 @@ public final class Portal {
         decoration.add(marker);
         setScene(scene);
         if (!showLabel) return;
-        double labelHeight = style == Style.RIFT ? height * 1.53 + .5 : rift ? height + 1.4 : height + (outer != null ? 2.5 : 1.0), labelZ = rift || outer == null ? .5 : 1.2;
+        double labelHeight = style == Style.RIFT ? height * 1.53 + 1.1 : rift ? height + 1.4 : height + (outer != null ? 2.5 : 1.0), labelZ = rift || outer == null ? .5 : 1.2;
         label = world.spawn(at(width / 2.0, labelHeight, labelZ), TextDisplay.class, d -> {
             d.setPersistent(false); d.setBillboard(Display.Billboard.CENTER); d.setShadowed(true);
         });
@@ -384,7 +384,7 @@ public final class Portal {
         double t = random.nextDouble();
         double half = .8 * width / 3.0 * Math.pow(Math.sin(Math.PI * t), .95) * .9 + outside;
         double side = random.nextBoolean() ? 1 : -1;
-        return at(width / 2.0 + side * half + (random.nextDouble() - .5) * .3, -.25 + height * 1.533 * t, .02);
+        return at(width / 2.0 + side * half + (random.nextDouble() - .5) * .3, .35 + height * 1.533 * t, .02);   // lifted 0.6 like in the shader
     }
 
     /** Random point on the edge of the opening of the styles inferno, storm, void and frost (as in the shader). */
@@ -630,7 +630,7 @@ public final class Portal {
 
     private void riftParticles() {
         var random = ThreadLocalRandom.current();
-        Location centre = at(width / 2.0, height * .55, 0);
+        Location centre = at(width / 2.0, height * .55 + .6, 0);
         for (Player p : world.getPlayers()) {
             double distance = p.getLocation().distanceSquared(centre);
             if (distance > 900) continue;

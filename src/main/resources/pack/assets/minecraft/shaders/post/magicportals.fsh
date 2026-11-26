@@ -210,7 +210,8 @@ float noise2(vec2 p) {
 }
 
 vec2 RIFT_CENTER = vec2(1.5, 2.05);
-const float RIFT_BOTTOM = -0.25;    // lower tip (just below the floor)
+const float RIFT_LIFT = 0.6;        // the rift floats this far above the floor
+const float RIFT_BOTTOM = -0.25 + RIFT_LIFT;   // lower tip
 float RIFT_HEIGHT = 4.6;            // up to the upper tip
 float RIFT_HALF_WIDTH = 0.8;        // half width at the widest point
 
@@ -601,7 +602,7 @@ void main() {
     OPENING_W = float(((code >> 2) & 7) + 1);
     OPENING_H = float(((code >> 5) & 7) + 1);
     gridX0 = DP_RX0 + (int(OPENING_W) - 1) / 2;
-    RIFT_CENTER = vec2(OPENING_W * 0.5, OPENING_H * 0.683);
+    RIFT_CENTER = vec2(OPENING_W * 0.5, OPENING_H * 0.683 + RIFT_LIFT);
     RIFT_HEIGHT = OPENING_H * 1.533;
     RIFT_HALF_WIDTH = 0.8 * OPENING_W / 3.0;
     float time = readData(31) * 1200.0;                 // seconds within one game day
