@@ -199,7 +199,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                     Facing.parse(p.getString("facing", "south")), p.getInt("width", 3), p.getInt("height", 3),
                     noFrame ? null : material(p.getString("frame.outer"), Material.STONE_BRICKS),
                     noFrame ? null : material(p.getString("frame.inner"), Material.POLISHED_BLACKSTONE_BRICKS),
-                    style.equals("rift"), p.getBoolean("inside-view", false), p.getBoolean("barriers", true), messages.get("offline.sign")));
+                    style.equals("rift"), p.getBoolean("inside-view", false), p.getBoolean("barriers", false), messages.get("offline.sign")));
         }
         scenesVersion = -1;
         for (Portal p : portals) {
@@ -578,7 +578,7 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                     case "width" -> c.getInt(path + ".width", 3);
                     case "height" -> c.getInt(path + ".height", 3);
                     case "inside-view" -> c.getBoolean(path + ".inside-view", false);
-                    case "barriers" -> c.getBoolean(path + ".barriers", true);
+                    case "barriers" -> c.getBoolean(path + ".barriers", false);
                     default -> "none".equalsIgnoreCase(c.getString(path + ".frame")) ? "none" : "wall";
                 };
                 sender.sendMessage(Component.text("  " + key + ": ", NamedTextColor.GRAY).append(Component.text(String.valueOf(value))));
