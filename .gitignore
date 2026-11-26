@@ -1,0 +1,15 @@
+# Build output
+build/
+.gradle/
+out/
+*.class
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Never commit server data or credentials
+run/
+*.jar
+!gradle/wrapper/gradle-wrapper.jar

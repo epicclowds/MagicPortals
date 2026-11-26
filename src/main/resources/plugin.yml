@@ -1,0 +1,18 @@
+name: MagicPortals
+version: '${version}'
+main: magicportals.MagicPortals
+api-version: '26.3'
+description: Walk-through portals between the servers of a Velocity network, with a live 3D view into the destination world
+website: https://github.com/epicclowds/MagicPortals
+author: epicclowds
+softdepend: [Oraxen, ItemsAdder, UltimateUI]
+commands:
+  magicportals:
+    description: Manage portals and update the portal scenes
+    usage: /magicportals <list|set|remove|style|update|reload>
+    aliases: [mp, magicportal]
+    permission: magicportals.admin
+permissions:
+  magicportals.admin:
+    description: Manage portals
+    default: op

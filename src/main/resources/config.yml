@@ -1,0 +1,65 @@
+# ─────────────────────────────────────────────────────────────────────────────
+#  MagicPortals – https://github.com/epicclowds/MagicPortals
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Name of THIS server, exactly as it is listed under [servers] in velocity.toml.
+server: ""
+
+# Language of in-game messages: en or de
+language: en
+
+# How the servers share heartbeats, arrivals and portal snapshots.
+# All servers of the network must use the same type and the same folder/database.
+exchange:
+  # folder: a shared folder (all servers on the same machine)
+  # mysql:  a MySQL/MariaDB database (servers on different machines, cloud systems)
+  type: folder
+  # Shared folder, relative to the server directory
+  folder: ../portal-exchange
+  mysql:
+    host: localhost
+    port: 3306
+    database: ""
+    username: ""
+    password: ""
+    table-prefix: magicportals_
+    options: useSSL=false&allowPublicKeyRetrieval=true
+
+# Fallback for players without the resource pack (or with shader packs like Iris):
+# the server sends real blocks of the destination behind the portal. Off by default.
+fallback-blocks: false
+
+# Portals on this server. Key = target server (name from velocity.toml).
+# Easiest way to add one in game: /magicportals set <target server> [display name]
+# If x/y/z are missing, MagicPortals picks a flat spot near the world spawn.
+# Every portal needs a counterpart on the target server that leads back here.
+portals: {}
+#  survival:
+#    name: Survival
+#    style: gate          # gate = opening in a thick stone wall, rift = floating dimensional crack
+#    x: 26
+#    y: 60
+#    z: -30
+#    frame:               # only for style gate
+#      outer: STONE_BRICKS
+#      inner: POLISHED_BLACKSTONE_BRICKS
+
+# Resource pack with the portal shader. Enable this on exactly ONE server of the network,
+# usually the lobby / the server that already handles your resource pack.
+resource-pack:
+  enabled: false
+  # auto | oraxen | itemsadder | standalone | none
+  # auto = Oraxen if installed, else ItemsAdder if installed, else standalone
+  provider: auto
+  # Minecraft client jar (for block models and textures while baking).
+  # Leave empty to download it automatically from Mojang (once, into plugins/MagicPortals/cache).
+  client-jar: ""
+  # Ultimate UI also overrides the outline shader. auto = detect it and keep its HUD working.
+  ultimateui: auto
+  # Only for provider standalone: MagicPortals hosts the pack itself and sends it to joining players.
+  standalone:
+    port: 8165
+    # Public address of the pack. Empty = http://<server-ip or localhost>:<port>/MagicPortals.zip
+    url: ""
+    required: false
+    prompt: "This server uses a resource pack for its portals."
