@@ -6,24 +6,24 @@
 #define DP_PIXEL 32
 #define DP_MAGIC 1234.5
 
-int dp_marker_szene(vec4 farbe) {
-    ivec3 c = ivec3(round(farbe.rgb * 255.0));
+int dp_marker_scene(vec4 color) {
+    ivec3 c = ivec3(round(color.rgb * 255.0));
     if (c.r == 254 && c.g >= 1 && c.g <= 2 && c.b >= 160 && c.b < 176) {
         return c.b - 160;
     }
     return -1;
 }
 
-int dp_marker_stil(vec4 farbe) {
-    return int(round(farbe.g * 255.0)) - 1;
+int dp_marker_style(vec4 color) {
+    return int(round(color.g * 255.0)) - 1;
 }
 
-vec4 dp_packen(float wert) {
-    uint b = floatBitsToUint(wert);
+vec4 dp_pack(float value) {
+    uint b = floatBitsToUint(value);
     return vec4(float((b >> 24) & 255u), float((b >> 16) & 255u), float((b >> 8) & 255u), float(b & 255u)) / 255.0;
 }
 
-float dp_entpacken(vec4 t) {
+float dp_unpack(vec4 t) {
     uvec4 b = uvec4(round(clamp(t, 0.0, 1.0) * 255.0));
     return uintBitsToFloat((b.r << 24) | (b.g << 16) | (b.b << 8) | b.a);
 }

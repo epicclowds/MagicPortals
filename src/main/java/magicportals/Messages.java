@@ -4,8 +4,8 @@ import java.util.Map;
 
 /* In-game messages in English and German ("language: en|de" in config.yml).
  * Placeholders {0}, {1}, ... are replaced in order. */
-final class Lang {
-    private static final Map<String, String[]> TEXTE = Map.ofEntries(
+final class Messages {
+    private static final Map<String, String[]> TEXTS = Map.ofEntries(
             Map.entry("offline.sign", new String[]{"offline", "gerade offline"}),
             Map.entry("offline.message", new String[]{"{0} is offline right now. Try again in a moment.", "{0} ist gerade offline. Versuche es gleich noch einmal."}),
             Map.entry("connect.failed", new String[]{"The connection did not complete. Step back and walk through the portal again.", "Verbindung nicht abgeschlossen. Geh einen Schritt zurück und erneut ins Tor."}),
@@ -42,14 +42,14 @@ final class Lang {
             Map.entry("help.reload", new String[]{"/magicportals reload – reload config.yml", "/magicportals reload – config.yml neu einlesen"})
     );
 
-    private final int sprache;
+    private final int language;
 
-    Lang(String code) { sprache = "de".equalsIgnoreCase(code) ? 1 : 0; }
+    Messages(String code) { language = "de".equalsIgnoreCase(code) ? 1 : 0; }
 
-    String t(String schluessel, Object... werte) {
-        String[] t = TEXTE.get(schluessel);
-        String text = t == null ? schluessel : t[sprache];
-        for (int i = 0; i < werte.length; i++) text = text.replace("{" + i + "}", String.valueOf(werte[i]));
+    String get(String key, Object... values) {
+        String[] t = TEXTS.get(key);
+        String text = t == null ? key : t[language];
+        for (int i = 0; i < values.length; i++) text = text.replace("{" + i + "}", String.valueOf(values[i]));
         return text.replace("''", "'");
     }
 }

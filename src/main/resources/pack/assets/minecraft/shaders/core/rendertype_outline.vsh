@@ -41,7 +41,7 @@ void main() {
     // The portal marker is a tiny glowing block display at the corner of the portal opening.
     // Instead of drawing it, its vertices are moved to a 32x1 pixel strip at the screen edge and
     // write camera position, rotation, projection, scene, style and game time into the outline buffer.
-    int scene = dp_marker_szene(Color);
+    int scene = dp_marker_scene(Color);
     if (scene >= 0) {
         mat3 rotation = mat3(ModelViewMat);
         vec3 relative = Position + inverse(rotation) * ModelViewMat[3].xyz;   // portal corner relative to the camera
@@ -53,7 +53,7 @@ void main() {
         dpD4 = vec4(rotation[0], camera.x);
         dpD5 = vec4(rotation[1], camera.y);
         dpD6 = vec4(rotation[2], camera.z);
-        dpD7 = vec4(float(scene), DP_MAGIC, float(dp_marker_stil(Color)), GameTime);
+        dpD7 = vec4(float(scene), DP_MAGIC, float(dp_marker_style(Color)), GameTime);
         dpMarker = 1;
 
         int corner = gl_VertexIndex % 4;

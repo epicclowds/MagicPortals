@@ -113,9 +113,7 @@ All commands need `magicportals.admin` (default: op). Aliases: `/mp`, `/magicpor
 ```
 The plugin jar ends up in `build/libs/`. Java 25 is required (Gradle downloads a toolchain if needed).
 
-The `tools/` folder contains helpers for development: `ShaderPruefen` compiles the portal shaders offline with shaderc (same compiler as the client), `Vorschau` renders a baked scene on the CPU, `LogoRender` draws the logo.
-
-> Code comments are partly German – the project started on a German server.
+The `tools/` folder contains helpers for development: `ShaderCheck` compiles the portal shaders offline with shaderc (same compiler as the client), `ScenePreview` renders a baked scene on the CPU, `LogoRender` draws the logo.
 
 ## License
 

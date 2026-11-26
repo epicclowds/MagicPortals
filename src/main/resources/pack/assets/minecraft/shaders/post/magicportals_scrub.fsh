@@ -13,9 +13,9 @@ layout(location = 0) out vec4 fragColor;
 
 void main() {
     ivec2 at = ivec2(gl_FragCoord.xy);
-    vec4 farbe = texture(InSampler, texCoord);
+    vec4 color = texture(InSampler, texCoord);
     if (at.y <= 1 && at.x < DP_PIXEL + 1) {
-        farbe = vec4(0.0);
+        color = vec4(0.0);
     }
-    fragColor = farbe;
+    fragColor = color;
 }

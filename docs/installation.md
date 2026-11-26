@@ -70,7 +70,7 @@ exchange:
     table-prefix: magicportals_
 ```
 
-MagicPortals creates its tables itself (`magicportals_server`, `_ankunft`, `_aufnahme`, `_szene`, `_stand`). The MySQL driver ships with Paper, nothing to install. A dedicated database user with rights only on these tables is a good idea.
+MagicPortals creates its tables itself (`magicportals_server`, `_arrival`, `_snapshot`, `_scene`, `_state`). The MySQL driver ships with Paper, nothing to install. A dedicated database user with rights only on these tables is a good idea.
 
 **Shared folder** – only if every server runs on the same machine:
 
@@ -127,4 +127,4 @@ Restart all servers.
 
 ## Updating from "Dorfportal"
 
-MagicPortals is the successor of the German-only *Dorfportal* plugin. On the first start it copies `plugins/Dorfportal/config.yml`, converts the German keys (`tore`, `austausch`, `stil`, …) and keeps your MySQL table prefix, so existing snapshots stay valid. Remove the old `Dorfportal.jar` and run `/mp update` once.
+MagicPortals is the successor of the German-only *Dorfportal* plugin. On the first start it copies `plugins/Dorfportal/config.yml`, converts the German keys (`tore`, `austausch`, `stil`, …) and keeps your MySQL connection and table prefix. Remove the old `Dorfportal.jar`, wait a minute until every server has recorded its portals again, then run `/mp update` once.

@@ -3,6 +3,12 @@ package magicportals;
 import java.io.*;
 import java.nio.file.*;
 import java.util.*;
+import java.util.function.Consumer;
+import magicportals.bake.SceneBaker;
+import magicportals.exchange.Exchange;
+import magicportals.exchange.MySqlExchange;
+import magicportals.pack.ResourcePack;
+import magicportals.portal.Portal;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.*;
@@ -17,105 +23,106 @@ import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.potion.PotionEffect;
 import org.bukkit.potion.PotionEffectType;
 
-/* MagicPortals – walk-through portals between the servers of a Velocity network, with a live 3D view
+/**
+ * MagicPortals – walk-through portals between the servers of a Velocity network, with a live 3D view
  * of the destination drawn by a resource-pack shader.
- *
+ * <p>
  * Every server lists its portals in config.yml under "portals" (key = target server). A portal from A to B
  * shows what lies in front of the portal from B back to A, so every portal needs a counterpart.
  * Heartbeats, arrivals, snapshots and scene numbers are shared through a folder or a MySQL database
  * ("exchange"); all access to it happens off the main thread. "/magicportals update" bakes the scenes
- * and delivers the resource pack through Oraxen, ItemsAdder or the built-in web server. */
+ * and delivers the resource pack through Oraxen, ItemsAdder or the built-in web server.
+ */
 public final class MagicPortals extends JavaPlugin implements Listener, TabExecutor {
-    private String lokal;
-    private volatile Austausch austausch;
-    private World welt;
-    private Lang lang = new Lang("en");
-    private Paket paket;
-    private final List<Tor> tore = new ArrayList<>();
-    private final Map<UUID, Long> sperre = new HashMap<>();
-    private Map<String, Integer> szenen = Map.of();
-    private long szenenStand = -1;
+    private String server;
+    private volatile Exchange exchange;
+    private World world;
+    private Messages messages = new Messages("en");
+    private ResourcePack pack;
+    private final List<Portal> portals = new ArrayList<>();
+    private final Map<UUID, Long> cooldown = new HashMap<>();
+    private long scenesVersion = -1;
     private int tick;
-    private volatile boolean backtGerade, abgleichLaeuft;
-    private final long gestartet = System.currentTimeMillis();
-
-    Lang lang() { return lang; }
+    private volatile boolean updating, syncing;
+    private final long startedAt = System.currentTimeMillis();
 
     @Override public void onEnable() {
-        alteConfigUebernehmen();
+        migrateOldConfig();
         saveDefaultConfig();
-        paket = new Paket(this);
+        pack = new ResourcePack(this);
         Bukkit.getMessenger().registerOutgoingPluginChannel(this, "BungeeCord");
         Bukkit.getPluginManager().registerEvents(this, this);
-        var befehl = getCommand("magicportals");
-        if (befehl != null) { befehl.setExecutor(this); befehl.setTabCompleter(this); }
-        laden();
-        paket.webserverStarten();
-        Bukkit.getScheduler().runTaskTimer(this, this::aktualisieren, 1, 1);
+        var command = getCommand("magicportals");
+        if (command != null) { command.setExecutor(this); command.setTabCompleter(this); }
+        load();
+        pack.startWebServer();
+        Bukkit.getScheduler().runTaskTimer(this, this::tick, 1, 1);
     }
 
     @Override public void onDisable() {
-        for (Tor t : tore) t.abbauen();
-        tore.clear();
-        if (paket != null) paket.webserverStoppen();
-        var a = austausch;
-        if (a != null) {
-            try { a.abmelden(lokal); } catch (IOException e) { getLogger().warning(e.getMessage()); }
-            a.close();
+        for (Portal p : portals) p.tearDown();
+        portals.clear();
+        if (pack != null) pack.stopWebServer();
+        var ex = exchange;
+        if (ex != null) {
+            try { ex.signOff(server); } catch (IOException e) { getLogger().warning(e.getMessage()); }
+            ex.close();
         }
     }
 
-    // ---------- helpers for work off the main thread ----------
+    // ---------- work off the main thread ----------
 
-    private interface Arbeit<T> { T tun(Austausch a) throws Exception; }
+    private interface Task<T> { T run(Exchange exchange) throws Exception; }
 
-    /* Runs the work asynchronously and hands the result back on the main thread. */
-    private <T> void spaeter(Arbeit<T> arbeit, java.util.function.Consumer<T> danach) {
-        var a = austausch;
+    /** Runs the task asynchronously and hands the result back on the main thread. */
+    private <T> void async(Task<T> task, Consumer<T> then) {
+        var ex = exchange;
         Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
-            T ergebnis;
-            try { ergebnis = arbeit.tun(a); }
+            T result;
+            try { result = task.run(ex); }
             catch (Exception e) { getLogger().warning("Exchange: " + e.getMessage()); return; }
-            if (danach != null && isEnabled()) Bukkit.getScheduler().runTask(this, () -> danach.accept(ergebnis));
+            if (then != null && isEnabled()) Bukkit.getScheduler().runTask(this, () -> then.accept(result));
         });
     }
 
-    private void speichern(Tor.Aufnahme aufnahme) {
-        spaeter(a -> {
-            a.aufnahmeSpeichern(aufnahme.schluessel(), "blick", aufnahme.vorne().alsBytes());
-            a.aufnahmeSpeichern(aufnahme.schluessel(), "rueck", aufnahme.rueck().alsBytes());
-            return null;
-        }, null);
+    private void save(Portal.Capture capture) {
+        async(ex -> { saveCapture(ex, capture); return null; }, null);
     }
 
-    private String austauschName() { return austausch instanceof MysqlAustausch ? "MySQL" : "folder"; }
+    private static void saveCapture(Exchange ex, Portal.Capture capture) throws IOException {
+        ex.saveSnapshot(capture.key(), Exchange.FRONT, capture.front().toBytes());
+        ex.saveSnapshot(capture.key(), Exchange.BACK, capture.back().toBytes());
+    }
+
+    private String exchangeName() { return exchange instanceof MySqlExchange ? "MySQL" : "folder"; }
 
     // ---------- configuration ----------
 
-    /* Takes over the config of the predecessor plugin "Dorfportal" (German keys) once. */
-    private void alteConfigUebernehmen() {
-        Path neu = getDataFolder().toPath().resolve("config.yml");
-        Path alt = getDataFolder().toPath().getParent().resolve("Dorfportal/config.yml");
+    /** Takes over the config of the predecessor plugin "Dorfportal" (German keys) once. */
+    private void migrateOldConfig() {
+        Path current = getDataFolder().toPath().resolve("config.yml");
+        Path old = getDataFolder().toPath().getParent().resolve("Dorfportal/config.yml");
         try {
-            if (!Files.exists(neu) && Files.exists(alt)) {
-                Files.createDirectories(neu.getParent());
-                Files.copy(alt, neu);
+            if (!Files.exists(current) && Files.exists(old)) {
+                Files.createDirectories(current.getParent());
+                Files.copy(old, current);
                 getLogger().info("Took over plugins/Dorfportal/config.yml");
             }
-            if (!Files.exists(neu)) return;
-            var c = YamlConfiguration.loadConfiguration(neu.toFile());
-            if (deutscheSchluesselUmstellen(c)) {
-                c.save(neu.toFile());
+            if (!Files.exists(current)) return;
+            var c = YamlConfiguration.loadConfiguration(current.toFile());
+            if (convertGermanKeys(c)) {
+                c.save(current.toFile());
                 getLogger().info("config.yml converted to the MagicPortals format.");
             }
         } catch (IOException e) { getLogger().warning("Could not convert the old config: " + e.getMessage()); }
     }
 
-    private static boolean deutscheSchluesselUmstellen(FileConfiguration c) {
-        boolean geaendert = false;
+    /** Converts the German keys of Dorfportal (tore, austausch, stil, ...) into the MagicPortals format. */
+    private static boolean convertGermanKeys(FileConfiguration c) {
+        boolean changed = false;
         if (c.contains("tor.x") && !c.contains("tore") && !c.contains("portals")) {   // very first version
-            String ziel = c.getString("ziel", "lobby".equals(c.getString("server")) ? "smp" : "lobby");
-            for (String k : List.of("x", "y", "z")) c.set("tore." + ziel + "." + k, c.getInt("tor." + k));
+            String target = c.getString("ziel", "lobby".equals(c.getString("server")) ? "smp" : "lobby");
+            for (String k : List.of("x", "y", "z")) c.set("tore." + target + "." + k, c.getInt("tor." + k));
             c.set("tor", null); c.set("ziel", null); c.set("karten", null); c.set("diagnose", null);
         }
         if (c.contains("austausch")) {
@@ -131,278 +138,287 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
                     c.set("exchange.mysql.password", m.getString("passwort")); c.set("exchange.mysql.table-prefix", m.getString("tabellen-praefix", "dorfportal_"));
                 }
             }
-            c.set("austausch", null); geaendert = true;
+            c.set("austausch", null); changed = true;
         }
-        if (c.contains("scheinbloecke")) { c.set("fallback-blocks", c.getBoolean("scheinbloecke")); c.set("scheinbloecke", null); geaendert = true; }
+        if (c.contains("scheinbloecke")) { c.set("fallback-blocks", c.getBoolean("scheinbloecke")); c.set("scheinbloecke", null); changed = true; }
         if (c.contains("tore")) {
-            var t = c.getConfigurationSection("tore");
-            for (String ziel : t.getKeys(false)) {
-                var a = t.getConfigurationSection(ziel);
-                String p = "portals." + ziel + ".";
-                if (a.contains("name")) c.set(p + "name", a.getString("name"));
-                c.set(p + "style", "riss".equalsIgnoreCase(a.getString("stil", "tor")) ? "rift" : "gate");
-                for (String k : List.of("x", "y", "z")) if (a.contains(k)) c.set(p + k, a.getInt(k));
-                if (a.contains("rahmen.aussen")) c.set(p + "frame.outer", a.getString("rahmen.aussen"));
-                if (a.contains("rahmen.innen")) c.set(p + "frame.inner", a.getString("rahmen.innen"));
+            var gates = c.getConfigurationSection("tore");
+            for (String target : gates.getKeys(false)) {
+                var g = gates.getConfigurationSection(target);
+                String p = "portals." + target + ".";
+                if (g.contains("name")) c.set(p + "name", g.getString("name"));
+                c.set(p + "style", "riss".equalsIgnoreCase(g.getString("stil", "tor")) ? "rift" : "gate");
+                for (String k : List.of("x", "y", "z")) if (g.contains(k)) c.set(p + k, g.getInt(k));
+                if (g.contains("rahmen.aussen")) c.set(p + "frame.outer", g.getString("rahmen.aussen"));
+                if (g.contains("rahmen.innen")) c.set(p + "frame.inner", g.getString("rahmen.innen"));
             }
-            c.set("tore", null); geaendert = true;
+            c.set("tore", null); changed = true;
         }
         if (c.contains("backen")) {
             c.set("resource-pack.enabled", true);
             c.set("resource-pack.provider", "auto");
             c.set("resource-pack.client-jar", c.getString("backen.client-jar", ""));
-            c.set("backen", null); geaendert = true;
+            c.set("backen", null); changed = true;
         }
-        if (geaendert && !c.contains("language")) c.set("language", "de");
-        return geaendert;
+        if (changed && !c.contains("language")) c.set("language", "de");
+        return changed;
     }
 
-    private void laden() {
-        for (Tor t : tore) t.abbauen();
-        tore.clear();
+    private void load() {
+        for (Portal p : portals) p.tearDown();
+        portals.clear();
         reloadConfig();
         var c = getConfig();
-        lang = new Lang(c.getString("language", "en"));
-        lokal = c.getString("server", "").trim();
-        if (lokal.isEmpty()) throw new IllegalStateException("config.yml: set 'server' to the name of this server in velocity.toml");
-        var alt = austausch;
-        try { austausch = Austausch.aus(c, getDataFolder().toPath(), getLogger()); }
+        messages = new Messages(c.getString("language", "en"));
+        server = c.getString("server", "").trim();
+        if (server.isEmpty()) throw new IllegalStateException("config.yml: set 'server' to the name of this server in velocity.toml");
+        var old = exchange;
+        try { exchange = Exchange.fromConfig(c, getLogger()); }
         catch (IOException e) { throw new IllegalStateException("Exchange not reachable: " + e.getMessage(), e); }
-        if (alt != null) alt.close();
-        getLogger().info("Exchange: " + austauschName());
-        welt = Bukkit.getWorlds().getFirst();
+        if (old != null) old.close();
+        getLogger().info("Exchange: " + exchangeName());
+        world = Bukkit.getWorlds().getFirst();
 
-        var abschnitt = c.getConfigurationSection("portals");
-        if (abschnitt != null) for (String ziel : abschnitt.getKeys(false)) {
-            ConfigurationSection t = abschnitt.getConfigurationSection(ziel);
-            if (t == null) continue;
-            int[] lage;
-            if (t.contains("x") && t.contains("y") && t.contains("z")) lage = new int[]{t.getInt("x"), t.getInt("y"), t.getInt("z")};
+        var section = c.getConfigurationSection("portals");
+        if (section != null) for (String target : section.getKeys(false)) {
+            ConfigurationSection p = section.getConfigurationSection(target);
+            if (p == null) continue;
+            int[] pos;
+            if (p.contains("x") && p.contains("y") && p.contains("z")) pos = new int[]{p.getInt("x"), p.getInt("y"), p.getInt("z")};
             else {
-                lage = platzSuchen();
-                t.set("x", lage[0]); t.set("y", lage[1]); t.set("z", lage[2]);
+                pos = findSpot();
+                p.set("x", pos[0]); p.set("y", pos[1]); p.set("z", pos[2]);
                 saveConfig();
-                getLogger().info("Portal to " + ziel + " placed automatically at " + lage[0] + " " + lage[1] + " " + lage[2]);
+                getLogger().info("Portal to " + target + " placed automatically at " + pos[0] + " " + pos[1] + " " + pos[2]);
             }
-            String name = t.getString("name", ziel.substring(0, 1).toUpperCase(Locale.ROOT) + ziel.substring(1));
-            String stil = t.getString("style", "gate").toLowerCase(Locale.ROOT);
-            tore.add(new Tor(this, welt, ziel, name, lage[0], lage[1], lage[2],
-                    material(t.getString("frame.outer"), Material.STONE_BRICKS),
-                    material(t.getString("frame.inner"), Material.POLISHED_BLACKSTONE_BRICKS),
-                    stil.equals("rift") || stil.equals("riss")));
+            String name = p.getString("name", target.substring(0, 1).toUpperCase(Locale.ROOT) + target.substring(1));
+            String style = p.getString("style", "gate").toLowerCase(Locale.ROOT);
+            portals.add(new Portal(this, world, target, name, pos[0], pos[1], pos[2],
+                    material(p.getString("frame.outer"), Material.STONE_BRICKS),
+                    material(p.getString("frame.inner"), Material.POLISHED_BLACKSTONE_BRICKS),
+                    style.equals("rift"), messages.get("offline.sign")));
         }
-        szenenStand = -1;
-        for (Tor t : tore) {
-            t.bauen();
-            speichern(t.allesAufnehmen(lokal));
-            getLogger().info("Portal " + lokal + " -> " + t.ziel + " at " + t.x + " " + t.y + " " + t.z + (t.riss ? " (rift)" : " (gate)"));
+        scenesVersion = -1;
+        for (Portal p : portals) {
+            p.build();
+            save(p.captureAll(server));
+            getLogger().info("Portal " + server + " -> " + p.target + " at " + p.x + " " + p.y + " " + p.z + (p.rift ? " (rift)" : " (gate)"));
         }
-        abgleichen();
+        sync();
     }
 
-    private static Material material(String text, Material standard) {
+    private static Material material(String text, Material fallback) {
         Material m = text == null ? null : Material.matchMaterial(text);
-        return m != null && m.isBlock() ? m : standard;
+        return m != null && m.isBlock() ? m : fallback;
     }
 
-    private int[] platzSuchen() {
-        Location spawn = welt.getSpawnLocation();
+    /** Finds flat, solid ground near the world spawn that is not too close to another portal. */
+    private int[] findSpot() {
+        Location spawn = world.getSpawnLocation();
         for (int radius = 0; radius <= 64; radius += 4) for (int a = -radius; a <= radius; a += 4)
             for (int b = -radius; b <= radius; b += 4) {
                 if (Math.max(Math.abs(a), Math.abs(b)) != radius) continue;
                 int px = spawn.getBlockX() + a, pz = spawn.getBlockZ() + b;
-                if (tore.stream().anyMatch(t -> t.nahe(px, pz, 12))) continue;
-                int tief = 9999, hoch = -9999; boolean gut = true;
-                for (int i = -3; i <= 3 && gut; i++) for (int j = -3; j <= 4; j++) {
-                    int h = welt.getHighestBlockYAt(px + i, pz + j, HeightMap.MOTION_BLOCKING);
-                    var m = welt.getBlockAt(px + i, h, pz + j).getType();
-                    if (!m.isSolid() || Tag.LEAVES.isTagged(m) || Tag.LOGS.isTagged(m) || m == Material.CACTUS || m == Material.MAGMA_BLOCK) { gut = false; break; }
-                    tief = Math.min(tief, h); hoch = Math.max(hoch, h);
+                if (portals.stream().anyMatch(p -> p.near(px, pz, 12))) continue;
+                int low = 9999, high = -9999;
+                boolean ok = true;
+                for (int i = -3; i <= 3 && ok; i++) for (int j = -3; j <= 4; j++) {
+                    int h = world.getHighestBlockYAt(px + i, pz + j, HeightMap.MOTION_BLOCKING);
+                    var m = world.getBlockAt(px + i, h, pz + j).getType();
+                    if (!m.isSolid() || Tag.LEAVES.isTagged(m) || Tag.LOGS.isTagged(m) || m == Material.CACTUS || m == Material.MAGMA_BLOCK) { ok = false; break; }
+                    low = Math.min(low, h); high = Math.max(high, h);
                 }
-                if (gut && hoch - tief <= 1) return new int[]{px, hoch + 1, pz};
+                if (ok && high - low <= 1) return new int[]{px, high + 1, pz};
             }
-        int px = spawn.getBlockX() + 8 * tore.size(), pz = spawn.getBlockZ(), hoch = welt.getSeaLevel();
-        for (int i = -3; i <= 3; i++) for (int j = -3; j <= 5; j++) hoch = Math.max(hoch, welt.getHighestBlockYAt(px + i, pz + j));
-        for (int i = -3; i <= 3; i++) for (int j = -3; j <= 5; j++) welt.getBlockAt(px + i, hoch + 1, pz + j).setType(Material.SPRUCE_PLANKS, false);
-        return new int[]{px, hoch + 2, pz};
+        // no flat ground (e.g. ocean spawn): build a small wooden platform
+        int px = spawn.getBlockX() + 8 * portals.size(), pz = spawn.getBlockZ(), high = world.getSeaLevel();
+        for (int i = -3; i <= 3; i++) for (int j = -3; j <= 5; j++) high = Math.max(high, world.getHighestBlockYAt(px + i, pz + j));
+        for (int i = -3; i <= 3; i++) for (int j = -3; j <= 5; j++) world.getBlockAt(px + i, high + 1, pz + j).setType(Material.SPRUCE_PLANKS, false);
+        return new int[]{px, high + 2, pz};
     }
 
     // ---------- sync with the other servers ----------
 
-    private record Abgleich(Set<String> online, long szenenStand, Map<String, Integer> szenen, Map<String, byte[]> fern, Map<String, Long> fernStand) { }
+    private record SyncResult(Set<String> online, long scenesVersion, Map<String, Integer> scenes,
+                              Map<String, byte[]> remoteViews, Map<String, Long> remoteVersions) { }
 
-    /* Every 5 seconds: own heartbeat, who is online, new scene numbers, optionally the other side's view. */
-    private void abgleichen() {
-        if (abgleichLaeuft) return;
-        abgleichLaeuft = true;
-        boolean schein = getConfig().getBoolean("fallback-blocks", false);
-        long bekannterStand = szenenStand;
-        var fernBekannt = new HashMap<String, Long>();
-        for (Tor t : tore) fernBekannt.put(t.ziel, t.fernStand());
-        String ich = lokal;
-        var a0 = austausch;
+    /** Every 5 seconds: own heartbeat, who is online, new scene numbers, optionally the other sides' views. */
+    private void sync() {
+        if (syncing) return;
+        syncing = true;
+        boolean fallback = getConfig().getBoolean("fallback-blocks", false);
+        long knownScenes = scenesVersion;
+        var knownRemote = new HashMap<String, Long>();
+        for (Portal p : portals) knownRemote.put(p.target, p.remoteVersion());
+        String self = server;
+        var ex = exchange;
         Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
-            Abgleich ergebnis = null;
+            SyncResult result = null;
             try {
-                a0.lebenszeichen(ich);
-                Set<String> online = a0.online();
-                long stand = a0.szenenStand();
-                Map<String, Integer> neu = stand != bekannterStand ? a0.szenen() : null;
-                var fern = new HashMap<String, byte[]>(); var fernStand = new HashMap<String, Long>();
-                if (schein) for (var e : fernBekannt.entrySet()) {
-                    String s = Tor.schluessel(e.getKey(), ich);
-                    long st = a0.aufnahmeStand(s, "blick");
-                    if (st != 0 && st != e.getValue()) { byte[] d = a0.aufnahmeLaden(s, "blick"); if (d != null) { fern.put(e.getKey(), d); fernStand.put(e.getKey(), st); } }
+                ex.heartbeat(self);
+                Set<String> online = ex.online();
+                long version = ex.scenesVersion();
+                Map<String, Integer> scenes = version != knownScenes ? ex.scenes() : null;
+                var views = new HashMap<String, byte[]>();
+                var versions = new HashMap<String, Long>();
+                if (fallback) for (var e : knownRemote.entrySet()) {
+                    String key = Portal.key(e.getKey(), self);
+                    long v = ex.snapshotVersion(key, Exchange.FRONT);
+                    if (v != 0 && v != e.getValue()) {
+                        byte[] data = ex.loadSnapshot(key, Exchange.FRONT);
+                        if (data != null) { views.put(e.getKey(), data); versions.put(e.getKey(), v); }
+                    }
                 }
-                ergebnis = new Abgleich(online, stand, neu, fern, fernStand);
+                result = new SyncResult(online, version, scenes, views, versions);
             } catch (IOException e) { getLogger().warning("Sync: " + e.getMessage()); }
-            var fertig = ergebnis;
+            var done = result;
             if (!isEnabled()) return;
             Bukkit.getScheduler().runTask(this, () -> {
-                abgleichLaeuft = false;
-                if (fertig == null || a0 != austausch) return;
-                for (Tor t : tore) {
-                    t.erreichbarSetzen(fertig.online().contains(t.ziel));
-                    byte[] d = fertig.fern().get(t.ziel);
-                    if (d != null) t.fernSetzen(d, fertig.fernStand().get(t.ziel));
+                syncing = false;
+                if (done == null || ex != exchange) return;
+                for (Portal p : portals) {
+                    p.setReachable(done.online().contains(p.target));
+                    byte[] view = done.remoteViews().get(p.target);
+                    if (view != null) p.setRemoteView(view, done.remoteVersions().get(p.target));
                 }
-                if (fertig.szenen() != null) {
-                    szenen = fertig.szenen(); szenenStand = fertig.szenenStand();
-                    for (Tor t : tore) t.markerSetzen(szenen.get(Tor.schluessel(t.ziel, lokal)));
+                if (done.scenes() != null) {
+                    scenesVersion = done.scenesVersion();
+                    for (Portal p : portals) p.setScene(done.scenes().get(Portal.key(p.target, server)));
                 }
             });
         });
     }
 
-    private void aktualisieren() {
-        if (tick % 100 == 0) abgleichen();
-        if (tick % 1200 == 600) for (Tor t : tore) t.aufnahmeStarten();
-        for (Tor t : tore) { var fertig = t.aufnahmeSchritt(lokal); if (fertig != null) speichern(fertig); }
+    private void tick() {
+        if (tick % 100 == 0) sync();
+        if (tick % 1200 == 600) for (Portal p : portals) p.startCapture();
+        for (Portal p : portals) { var done = p.captureStep(server); if (done != null) save(done); }
         if (tick % 2 == 0 && getConfig().getBoolean("fallback-blocks", false))
-            for (Player p : welt.getPlayers()) for (Tor t : tore) t.blickAktualisieren(p, tick);
-        if (tick % 4 == 0) for (Tor t : tore) t.partikel();
+            for (Player player : world.getPlayers()) for (Portal p : portals) p.updateFallback(player, tick);
+        if (tick % 4 == 0) for (Portal p : portals) p.particles();
         tick = (tick + 1) % 1200;
     }
 
     // ---------- walking through and arriving ----------
 
-    @EventHandler(ignoreCancelled = true) public void gehen(PlayerMoveEvent e) {
-        if (e.getFrom().getWorld() != welt || e.getTo().getWorld() != welt) return;
-        for (Tor t : tore) if (t.durchschritten(e.getFrom(), e.getTo())) { wechsel(e.getPlayer(), t); return; }
+    @EventHandler(ignoreCancelled = true) public void onMove(PlayerMoveEvent e) {
+        if (e.getFrom().getWorld() != world || e.getTo().getWorld() != world) return;
+        for (Portal p : portals) if (p.walkedThrough(e.getFrom(), e.getTo())) { travel(e.getPlayer(), p); return; }
     }
 
-    private void wechsel(Player p, Tor t) {
-        long jetzt = System.currentTimeMillis();
-        if (sperre.getOrDefault(p.getUniqueId(), 0L) > jetzt) return;
-        sperre.put(p.getUniqueId(), jetzt + 5000);
-        if (!t.erreichbar) { p.sendMessage(Component.text(lang.t("offline.message", t.name))); return; }
-        UUID id = p.getUniqueId();
-        String ich = lokal;
-        p.playSound(p.getLocation(), "minecraft:block.portal.travel", .35f, 1.25f);
+    private void travel(Player player, Portal portal) {
+        long now = System.currentTimeMillis();
+        if (cooldown.getOrDefault(player.getUniqueId(), 0L) > now) return;
+        cooldown.put(player.getUniqueId(), now + 5000);
+        if (!portal.reachable()) { player.sendMessage(Component.text(messages.get("offline.message", portal.name))); return; }
+        UUID id = player.getUniqueId();
+        String self = server;
+        player.playSound(player.getLocation(), "minecraft:block.portal.travel", .35f, 1.25f);
         // Store the arrival first, then connect, so the target server finds it when the player joins.
-        spaeter(a -> { a.ankunftSetzen(t.ziel, id, ich); return true; }, ok -> {
-            if (!p.isOnline()) return;
+        async(ex -> { ex.setArrival(portal.target, id, self); return true; }, ok -> {
+            if (!player.isOnline()) return;
             var bytes = new ByteArrayOutputStream();
-            try (var out = new DataOutputStream(bytes)) { out.writeUTF("Connect"); out.writeUTF(t.ziel); }
+            try (var out = new DataOutputStream(bytes)) { out.writeUTF("Connect"); out.writeUTF(portal.target); }
             catch (IOException e) { return; }
-            p.sendPluginMessage(this, "BungeeCord", bytes.toByteArray());
+            player.sendPluginMessage(this, "BungeeCord", bytes.toByteArray());
             Bukkit.getScheduler().runTaskLater(this, () -> {
-                if (p.isOnline() && Bukkit.getPlayer(id) == p) p.sendMessage(Component.text(lang.t("connect.failed")));
+                if (player.isOnline() && Bukkit.getPlayer(id) == player) player.sendMessage(Component.text(messages.get("connect.failed")));
             }, 100);
         });
     }
 
-    @EventHandler public void beitritt(PlayerJoinEvent e) {
-        Player p = e.getPlayer();
-        paket.senden(p);
-        UUID id = p.getUniqueId();
-        String ich = lokal;
-        spaeter(a -> Optional.ofNullable(a.ankunftHolen(ich, id)), herkunft -> {
-            if (herkunft.isEmpty() || !p.isOnline()) return;
-            Tor tor = tore.stream().filter(t -> t.ziel.equals(herkunft.get())).findFirst().orElse(tore.isEmpty() ? null : tore.getFirst());
-            if (tor == null) return;
-            Location ankunft = tor.ankunft();
-            p.teleport(ankunft);
-            p.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, 70, 0, false, false, false));
-            p.playSound(ankunft, "minecraft:block.amethyst_block.chime", .7f, 1.1f);
-            p.playSound(ankunft, "minecraft:block.portal.trigger", .25f, 1.6f);
+    @EventHandler public void onJoin(PlayerJoinEvent e) {
+        Player player = e.getPlayer();
+        pack.send(player);
+        UUID id = player.getUniqueId();
+        String self = server;
+        async(ex -> Optional.ofNullable(ex.takeArrival(self, id)), origin -> {
+            if (origin.isEmpty() || !player.isOnline()) return;
+            Portal portal = portals.stream().filter(p -> p.target.equals(origin.get())).findFirst().orElse(portals.isEmpty() ? null : portals.getFirst());
+            if (portal == null) return;
+            Location arrival = portal.arrival();
+            player.teleport(arrival);
+            player.addPotionEffect(new PotionEffect(PotionEffectType.NAUSEA, 70, 0, false, false, false));
+            player.playSound(arrival, "minecraft:block.amethyst_block.chime", .7f, 1.1f);
+            player.playSound(arrival, "minecraft:block.portal.trigger", .25f, 1.6f);
         });
     }
 
-    @EventHandler public void verlassen(PlayerQuitEvent e) {
-        sperre.remove(e.getPlayer().getUniqueId());
-        for (Tor t : tore) t.zuruecksetzen(e.getPlayer());
+    @EventHandler public void onQuit(PlayerQuitEvent e) {
+        cooldown.remove(e.getPlayer().getUniqueId());
+        for (Portal p : portals) p.reset(e.getPlayer());
     }
 
-    @EventHandler public void teleport(PlayerTeleportEvent e) {
-        if (e.getTo().getWorld() != welt) for (Tor t : tore) t.zuruecksetzen(e.getPlayer());
+    @EventHandler public void onTeleport(PlayerTeleportEvent e) {
+        if (e.getTo().getWorld() != world) for (Portal p : portals) p.reset(e.getPlayer());
     }
 
     // ---------- commands ----------
 
-    private Component text(String schluessel, Object... werte) { return Component.text(lang.t(schluessel, werte)); }
-    private Component fehler(String schluessel, Object... werte) { return Component.text(lang.t(schluessel, werte), NamedTextColor.RED); }
+    private Component text(String key, Object... values) { return Component.text(messages.get(key, values)); }
+    private Component error(String key, Object... values) { return Component.text(messages.get(key, values), NamedTextColor.RED); }
 
-    private static String befehl(String eingabe) {
-        return switch (eingabe.toLowerCase(Locale.ROOT)) {
+    /** Maps the old German sub-commands of Dorfportal to the English ones. */
+    private static String subCommand(String input) {
+        return switch (input.toLowerCase(Locale.ROOT)) {
             case "liste" -> "list";
             case "setzen" -> "set";
             case "entfernen" -> "remove";
             case "stil" -> "style";
             case "aktualisieren" -> "update";
             case "neuladen" -> "reload";
-            default -> eingabe.toLowerCase(Locale.ROOT);
+            default -> input.toLowerCase(Locale.ROOT);
         };
     }
 
     @Override public boolean onCommand(CommandSender sender, Command cmd, String label, String[] args) {
-        String was = args.length == 0 ? "help" : befehl(args[0]);
-        switch (was) {
+        String sub = args.length == 0 ? "help" : subCommand(args[0]);
+        switch (sub) {
             case "list" -> {
-                sender.sendMessage(text("list.header", lokal, austauschName()));
-                if (tore.isEmpty()) sender.sendMessage(text("list.none"));
-                for (Tor t : tore) sender.sendMessage(Component.text("  → " + t.ziel + "  " + t.x + " " + t.y + " " + t.z + "  " + lang.t(t.riss ? "style.rift" : "style.gate") + "  ")
-                        .append(t.erreichbar ? Component.text(lang.t("list.online"), NamedTextColor.GREEN) : Component.text(lang.t("list.offline"), NamedTextColor.RED))
-                        .append(Component.text(t.szene() == null ? lang.t("list.noscene") : lang.t("list.scene", t.szene()), NamedTextColor.GRAY)));
+                sender.sendMessage(text("list.header", server, exchangeName()));
+                if (portals.isEmpty()) sender.sendMessage(text("list.none"));
+                for (Portal p : portals) sender.sendMessage(Component.text("  → " + p.target + "  " + p.x + " " + p.y + " " + p.z + "  " + messages.get(p.rift ? "style.rift" : "style.gate") + "  ")
+                        .append(p.reachable() ? Component.text(messages.get("list.online"), NamedTextColor.GREEN) : Component.text(messages.get("list.offline"), NamedTextColor.RED))
+                        .append(Component.text(p.scene() == null ? messages.get("list.noscene") : messages.get("list.scene", p.scene()), NamedTextColor.GRAY)));
             }
             case "set" -> {
-                if (!(sender instanceof Player p)) { sender.sendMessage(fehler("only.ingame")); return true; }
-                if (args.length < 2) { sender.sendMessage(fehler("set.usage")); return true; }
-                String ziel = args[1];
-                if (ziel.equals(lokal) || !ziel.matches("[A-Za-z0-9_-]+")) { sender.sendMessage(fehler("set.invalid", ziel)); return true; }
-                Location l = p.getLocation();
-                String pfad = "portals." + ziel;
-                getConfig().set(pfad + ".x", l.getBlockX());
-                getConfig().set(pfad + ".y", l.getBlockY());
-                getConfig().set(pfad + ".z", l.getBlockZ() - 3);
-                if (!getConfig().contains(pfad + ".style")) getConfig().set(pfad + ".style", "gate");
-                if (args.length >= 3) getConfig().set(pfad + ".name", String.join(" ", Arrays.copyOfRange(args, 2, args.length)));
+                if (!(sender instanceof Player player)) { sender.sendMessage(error("only.ingame")); return true; }
+                if (args.length < 2) { sender.sendMessage(error("set.usage")); return true; }
+                String target = args[1];
+                if (target.equals(server) || !target.matches("[A-Za-z0-9_-]+")) { sender.sendMessage(error("set.invalid", target)); return true; }
+                Location l = player.getLocation();
+                String path = "portals." + target;
+                getConfig().set(path + ".x", l.getBlockX());
+                getConfig().set(path + ".y", l.getBlockY());
+                getConfig().set(path + ".z", l.getBlockZ() - 3);
+                if (!getConfig().contains(path + ".style")) getConfig().set(path + ".style", "gate");
+                if (args.length >= 3) getConfig().set(path + ".name", String.join(" ", Arrays.copyOfRange(args, 2, args.length)));
                 saveConfig();
-                laden();
-                sender.sendMessage(text("set.done", ziel));
-                sender.sendMessage(text("set.counterpart", ziel, lokal));
+                load();
+                sender.sendMessage(text("set.done", target));
+                sender.sendMessage(text("set.counterpart", target, server));
             }
             case "remove" -> {
-                if (args.length < 2 || !getConfig().contains("portals." + args[1])) { sender.sendMessage(fehler("remove.unknown")); return true; }
+                if (args.length < 2 || !getConfig().contains("portals." + args[1])) { sender.sendMessage(error("remove.unknown")); return true; }
                 getConfig().set("portals." + args[1], null);
                 saveConfig();
-                String schluessel = Tor.schluessel(lokal, args[1]);
-                laden();
-                spaeter(a -> { a.aufnahmeLoeschen(schluessel); return null; }, null);
+                String key = Portal.key(server, args[1]);
+                load();
+                async(ex -> { ex.deleteSnapshots(key); return null; }, null);
                 sender.sendMessage(text("remove.done", args[1]));
             }
             case "style" -> {
-                String stil = args.length >= 3 ? switch (args[2].toLowerCase(Locale.ROOT)) { case "riss", "rift" -> "rift"; case "tor", "gate" -> "gate"; default -> ""; } : "";
-                if (args.length < 3 || !getConfig().contains("portals." + args[1]) || stil.isEmpty()) { sender.sendMessage(fehler("style.usage")); return true; }
-                getConfig().set("portals." + args[1] + ".style", stil);
+                String style = args.length >= 3 ? switch (args[2].toLowerCase(Locale.ROOT)) { case "riss", "rift" -> "rift"; case "tor", "gate" -> "gate"; default -> ""; } : "";
+                if (args.length < 3 || !getConfig().contains("portals." + args[1]) || style.isEmpty()) { sender.sendMessage(error("style.usage")); return true; }
+                getConfig().set("portals." + args[1] + ".style", style);
                 saveConfig();
-                laden();
-                sender.sendMessage(text("style.done", args[1], stil));
+                load();
+                sender.sendMessage(text("style.done", args[1], style));
             }
-            case "reload" -> { laden(); paket.webserverStarten(); sender.sendMessage(text("reload.done", tore.size())); }
-            case "update" -> aktualisierenBefehl(sender);
+            case "reload" -> { load(); pack.startWebServer(); sender.sendMessage(text("reload.done", portals.size())); }
+            case "update" -> update(sender);
             default -> {
-                for (String h : List.of("help.list", "help.set", "help.remove", "help.style", "help.update", "help.reload")) sender.sendMessage(text(h));
+                for (String help : List.of("help.list", "help.set", "help.remove", "help.style", "help.update", "help.reload")) sender.sendMessage(text(help));
             }
         }
         return true;
@@ -410,55 +426,52 @@ public final class MagicPortals extends JavaPlugin implements Listener, TabExecu
 
     @Override public List<String> onTabComplete(CommandSender sender, Command cmd, String label, String[] args) {
         if (args.length == 1) return List.of("list", "set", "remove", "style", "update", "reload").stream().filter(s -> s.startsWith(args[0].toLowerCase(Locale.ROOT))).toList();
-        String was = befehl(args[0]);
-        if (args.length == 2 && (was.equals("remove") || was.equals("style"))) return tore.stream().map(t -> t.ziel).toList();
-        if (args.length == 3 && was.equals("style")) return List.of("gate", "rift");
+        String sub = subCommand(args[0]);
+        if (args.length == 2 && (sub.equals("remove") || sub.equals("style"))) return portals.stream().map(p -> p.target).toList();
+        if (args.length == 3 && sub.equals("style")) return List.of("gate", "rift");
         return List.of();
     }
 
-    /* Bakes all scenes and delivers the resource pack. Only on the server with resource-pack.enabled. */
-    private void aktualisierenBefehl(CommandSender sender) {
-        if (!paket.aktiv()) { sender.sendMessage(fehler("update.disabled")); return; }
-        if (backtGerade) { sender.sendMessage(fehler("update.running")); return; }
+    /** Bakes all scenes and delivers the resource pack. Only on the server with resource-pack.enabled. */
+    private void update(CommandSender sender) {
+        if (!pack.enabled()) { sender.sendMessage(error("update.disabled")); return; }
+        if (updating) { sender.sendMessage(error("update.running")); return; }
         // Capture this server's portals right now; other servers capture every minute.
-        var eigene = new ArrayList<Tor.Aufnahme>();
-        for (Tor t : tore) eigene.add(t.allesAufnehmen(lokal));
-        backtGerade = true;
+        var own = new ArrayList<Portal.Capture>();
+        for (Portal p : portals) own.add(p.captureAll(server));
+        updating = true;
         sender.sendMessage(text("update.start"));
-        Path arbeit = getDataFolder().toPath().resolve("bake");
-        String anbieter = paket.anbieter();
-        var a = austausch;
+        Path work = getDataFolder().toPath().resolve("bake");
+        String provider = pack.provider();
+        var ex = exchange;
         Bukkit.getScheduler().runTaskAsynchronously(this, () -> {
             try {
-                for (var aufnahme : eigene) {
-                    a.aufnahmeSpeichern(aufnahme.schluessel(), "blick", aufnahme.vorne().alsBytes());
-                    a.aufnahmeSpeichern(aufnahme.schluessel(), "rueck", aufnahme.rueck().alsBytes());
-                }
-                Path jar = paket.clientJar(version -> Bukkit.getScheduler().runTask(this, () -> sender.sendMessage(text("update.jar", version))));
-                Path ausgabe = arbeit.resolve("output");
-                if (Files.exists(ausgabe)) try (var alt = Files.walk(ausgabe)) { alt.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete()); }
-                var meldungen = new ArrayList<String>();
-                Map<String, Integer> nummern = PortalBacken.backen(a.zumBacken(arbeit.resolve("input")), jar, ausgabe, meldungen::add);
-                for (String m : meldungen) getLogger().info(m);
-                a.szenenSetzen(nummern);
-                Path zip = paket.bauen(ausgabe);
-                String nachher = paket.ausliefern(zip, ausgabe);
+                for (var capture : own) saveCapture(ex, capture);
+                Path jar = pack.clientJar(version -> Bukkit.getScheduler().runTask(this, () -> sender.sendMessage(text("update.jar", version))));
+                Path output = work.resolve("output");
+                if (Files.exists(output)) try (var old = Files.walk(output)) { old.sorted(Comparator.reverseOrder()).forEach(p -> p.toFile().delete()); }
+                var log = new ArrayList<String>();
+                Map<String, Integer> numbers = SceneBaker.bake(ex.exportForBaking(work.resolve("input")), jar, output, log::add);
+                for (String line : log) getLogger().info(line);
+                ex.setScenes(numbers);
+                pack.build(output);
+                String afterwards = pack.deliver(output);
                 // Right after a server start Oraxen is still building its own pack; a reload during that
                 // time is lost. So reload at the earliest 60 s after start.
-                long warten = "oraxen".equals(anbieter) ? Math.max(1, (60_000 - (System.currentTimeMillis() - gestartet)) / 50) : 1;
+                long delay = "oraxen".equals(provider) ? Math.max(1, (60_000 - (System.currentTimeMillis() - startedAt)) / 50) : 1;
                 Bukkit.getScheduler().runTask(this, () -> {
-                    sender.sendMessage(text("update.done", nummern.size(), anbieter));
-                    if (warten > 20) sender.sendMessage(text("update.wait", anbieter));
-                    szenenStand = -1;
-                    abgleichen();
+                    sender.sendMessage(text("update.done", numbers.size(), provider));
+                    if (delay > 20) sender.sendMessage(text("update.wait", provider));
+                    scenesVersion = -1;
+                    sync();
                 });
                 Bukkit.getScheduler().runTaskLater(this, () -> {
-                    backtGerade = false;
-                    if (nachher != null) Bukkit.dispatchCommand(Bukkit.getConsoleSender(), nachher);
-                }, warten);
-            } catch (Exception ex) {
-                getLogger().warning("Update failed: " + ex);
-                Bukkit.getScheduler().runTask(this, () -> { backtGerade = false; sender.sendMessage(fehler("update.failed", String.valueOf(ex.getMessage()))); });
+                    updating = false;
+                    if (afterwards != null) Bukkit.dispatchCommand(Bukkit.getConsoleSender(), afterwards);
+                }, delay);
+            } catch (Exception e) {
+                getLogger().warning("Update failed: " + e);
+                Bukkit.getScheduler().runTask(this, () -> { updating = false; sender.sendMessage(error("update.failed", String.valueOf(e.getMessage()))); });
             }
         });
     }
