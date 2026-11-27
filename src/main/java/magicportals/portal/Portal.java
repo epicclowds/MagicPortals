@@ -936,11 +936,18 @@ public final class Portal {
         }
     }
 
+    /**
+     * Local z of the line that triggers the server switch. It lies just in front of the visible surface
+     * ({@link #PLANE}): the player's position is the centre of a 0.6 wide body, so with the line at the surface
+     * itself (or behind it, as before) players could stand half inside the drawn portal without being moved.
+     */
+    static final double TRIGGER = PLANE + .1;
+
     /** Did the player walk from the front side through the opening? */
     public boolean walkedThrough(Location from, Location to) {
         if (from.getWorld() != world || to.getWorld() != world) return false;
         double[] a = local(from), b = local(to);
-        double plane = .45;
+        double plane = TRIGGER;
         if (a[2] <= plane || b[2] > plane || to.distanceSquared(from) > 16) return false;
         double share = (a[2] - plane) / (a[2] - b[2]);
         double across = a[0] + (b[0] - a[0]) * share;
